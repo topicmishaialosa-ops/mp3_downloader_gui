@@ -1385,11 +1385,18 @@ impl LinkParserApp {
             .map_err(|e| format!("Ошибка клиента: {}", e))
     }
 
-    fn drivemusic_page_url(track: &TrackInfo) -> String {
-        if track.url.contains("drivemusic.me") && track.url.ends_with(".html") {
-            return track.url.clone();
+    fn drivemusic_page_url(track: &TrackInfo) -> Result<String, String> {
+        let u = track.url.trim();
+        if u.contains("drivemusic.me") && u.ends_with(".html") {
+            return Ok(u.to_string());
         }
-        format!("{}/shanson/{}.html", DRIVEMUSIC_BASE, track.id)
+        if u.starts_with('/') && u.ends_with(".html") {
+            return Ok(format!("{}{}", DRIVEMUSIC_BASE, u));
+        }
+        Err(
+            "DriveMusic: нет ссылки на страницу трека — найдите трек через поиск."
+                .into(),
+        )
     }
 
     fn drivemusic_extract_mp3_urls(html: &str) -> Vec<String> {
@@ -1510,7 +1517,13 @@ impl LinkParserApp {
             .replace(|c: char| "/\\:*?\"<>|".contains(c), "_");
 
             let filepath = folder.join(&filename);
-            let track_page = Self::drivemusic_page_url(&track);
+            let track_page = match Self::drivemusic_page_url(&track) {
+                Ok(p) => p,
+                Err(e) => {
+                    fail(&status, e);
+                    return;
+                }
+            };
 
             let _ = std::fs::create_dir_all(&folder);
 
@@ -2554,7 +2567,7 @@ impl LinkParserApp {
                     ui.horizontal(|ui| {
                         let placeholder = match self.download_source {
                             DownloadSource::Mp3Party => "Queen, Кино…",
-                            DownloadSource::DriveMusic => "Завьялов, Кино…",
+                            DownloadSource::DriveMusic => "Исполнитель или название…",
                             DownloadSource::YtDlp => "Queen Killer Queen…",
                         };
                         let search_resp = ui.add_sized(
@@ -3096,13 +3109,14 @@ impl LinkParserApp {
                                         }
                                     }
                                     if task.source == DownloadSource::DriveMusic {
-                                        let page = Self::drivemusic_page_url(track);
-                                        if ui
-                                            .add(theme.neutral_button("🌐 Браузер"))
-                                            .on_hover_text("Открыть страницу трека")
-                                            .clicked()
-                                        {
-                                            Self::open_external_url(&page);
+                                        if let Ok(page) = Self::drivemusic_page_url(track) {
+                                            if ui
+                                                .add(theme.neutral_button("🌐 Браузер"))
+                                                .on_hover_text("Открыть страницу трека")
+                                                .clicked()
+                                            {
+                                                Self::open_external_url(&page);
+                                            }
                                         }
                                     }
                                     if ui.small_button("✕").clicked() {

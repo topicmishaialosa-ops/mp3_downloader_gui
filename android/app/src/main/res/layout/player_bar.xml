@@ -48,7 +48,7 @@
                 app:layout_constraintStart_toEndOf="@id/playPauseButton"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintVertical_chainStyle="packed"
-                tools:text="Бутырка — Аттестат" />
+                tools:text="Исполнитель — Название" />
 
             <TextView
                 android:id="@+id/playerSubtitle"

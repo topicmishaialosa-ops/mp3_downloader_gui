@@ -42,7 +42,7 @@
             app:layout_constraintEnd_toStartOf="@+id/playFileButton"
             app:layout_constraintStart_toEndOf="@id/fileIcon"
             app:layout_constraintTop_toTopOf="parent"
-            tools:text="Бутырка - Аттестат" />
+            tools:text="Исполнитель - Название" />
 
         <TextView
             android:id="@+id/fileMeta"

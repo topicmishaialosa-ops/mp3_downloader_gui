@@ -144,10 +144,13 @@ object DriveMusicApi {
 
     private fun pageUrl(track: Track): String {
         val u = track.streamUrl.trim()
-        if (u.contains("drivemusic.me") && u.endsWith(".html")) {
-            return normalizeUrl(u)
+        when {
+            u.contains("drivemusic.me") && u.endsWith(".html") -> return normalizeUrl(u)
+            u.startsWith("/") && u.endsWith(".html") -> return "$BASE$u"
         }
-        return "$BASE/shanson/${track.id}.html"
+        throw IllegalStateException(
+            "DriveMusic: нет ссылки на страницу трека — найдите трек через поиск.",
+        )
     }
 
     private fun downloadCandidates(pageBody: String, track: Track): List<String> {

@@ -5,6 +5,8 @@
 **/.idea/
 *.iml
 downloads/
+dist/
+.gradle-home/
 *.apk
 *.aab
 .DS_Store

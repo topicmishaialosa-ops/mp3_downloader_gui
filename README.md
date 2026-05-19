@@ -13,26 +13,47 @@
 
 - Поиск и скачивание MP3/MP4
 - Библиотека локальных файлов, открытие папки музыки
-- Встроенный плеер с **перемоткой** (ползунок и время)
+- Встроенный плеер с перемоткой
 - Стриминг YouTube без полного скачивания
 - Тёмная/светлая тема (desktop)
 
-## Сборка
+## Скрипты сборки
 
-### Desktop (Linux)
+Запускайте из корня репозитория или двойным кликом из `scripts/`.
+
+| Платформа | Скрипт | Результат |
+|-----------|--------|-----------|
+| **Linux** (desktop) | [`scripts/build-linux.sh`](scripts/build-linux.sh) | `dist/linux/mp3_downloader_gui` |
+| **macOS** (desktop) | [`scripts/build-macos.sh`](scripts/build-macos.sh) | `dist/macos/mp3_downloader_gui` |
+| **Windows** (desktop) | [`scripts/build-windows.bat`](scripts/build-windows.bat) | `dist/windows/mp3_downloader_gui.exe` |
+| **Android** (Linux / macOS) | [`scripts/build-android.sh`](scripts/build-android.sh) | `dist/android/mp3-downloader-release.apk` |
+| **Android** (Windows) | [`scripts/build-android.bat`](scripts/build-android.bat) | `dist/android/mp3-downloader-release.apk` |
+
+### Linux / macOS (shell)
+
+```bash
+chmod +x scripts/*.sh
+./scripts/build-linux.sh    # только Linux
+./scripts/build-macos.sh    # только на Mac
+./scripts/build-android.sh  # нужен Android SDK (ANDROID_HOME)
+```
+
+### Windows (cmd)
+
+```bat
+scripts\build-windows.bat
+scripts\build-android.bat
+```
+
+Требования: [Rust](https://rustup.rs/), для Android — [Android SDK](https://developer.android.com/studio) и `ANDROID_HOME`.
+
+## Ручная сборка
 
 ```bash
 cargo build --release
-cargo run --release
+cd android && ./gradlew assembleRelease
 ```
 
-### Android APK
+## Лицензия
 
-```bash
-cd android
-./gradlew assembleRelease
-```
-
-APK: `android/app/build/outputs/apk/release/app-release.apk`
-
-
+Соблюдайте авторские права и условия источников (MP3Party, DriveMusic, YouTube).
