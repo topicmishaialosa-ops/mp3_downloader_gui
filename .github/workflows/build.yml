@@ -215,32 +215,45 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
 
       - name: Package zips
+        shell: bash
         run: |
-          set -euo pipefail
+          set -eo pipefail
           mkdir -p release
-          VERSION="${GITHUB_REF_NAME#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "$GITHUB_REF_NAME" ]; then
-            VERSION="1.4.3"
-          fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-          zip -j "release/mp3_downloader_gui-linux-x86_64.zip" \
-            artifacts/rust-linux-x86_64/mp3_downloader_gui
-          zip -j "release/mp3_downloader_gui-windows-x86_64.zip" \
-            artifacts/rust-windows-x86_64/mp3_downloader_gui.exe
-          zip -j "release/mp3_downloader_gui-macos-arm64.zip" \
-            artifacts/rust-macos-arm64/mp3_downloader_gui
-          zip -j "release/mp3_downloader_gui_qt-linux-x86_64.zip" \
-            artifacts/qt-linux-x86_64/mp3_downloader_gui_qt
-          zip -j "release/mp3_downloader_gui_qt-windows-x86_64.zip" \
-            artifacts/qt-windows-x86_64/mp3_downloader_gui_qt.exe
-          zip -j "release/mp3_downloader_gui_qt-macos-arm64.zip" \
-            artifacts/qt-macos-arm64/mp3_downloader_gui_qt
-          cp artifacts/android-apk/mp3-downloader-release.apk \
-            "release/mp3-downloader-${VERSION}.apk"
+          ref_name="${GITHUB_REF_NAME:-}"
+          version="${ref_name#v}"
+          if [ -z "$version" ] || [ "$version" = "$ref_name" ]; then
+            version="1.4.3"
+          fi
+          echo "VERSION=${version}" >> "$GITHUB_ENV"
+
+          artifact() {
+            local dir="$1" file="$2"
+            local path="artifacts/${dir}/${file}"
+            if [ ! -f "$path" ]; then
+              echo "Missing artifact: $path"
+              find artifacts -type f 2>/dev/null || true
+              exit 1
+            fi
+            printf '%s' "$path"
+          }
+
+          zip -j release/mp3_downloader_gui-linux-x86_64.zip \
+            "$(artifact rust-linux-x86_64 mp3_downloader_gui)"
+          zip -j release/mp3_downloader_gui-windows-x86_64.zip \
+            "$(artifact rust-windows-x86_64 mp3_downloader_gui.exe)"
+          zip -j release/mp3_downloader_gui-macos-arm64.zip \
+            "$(artifact rust-macos-arm64 mp3_downloader_gui)"
+          zip -j release/mp3_downloader_gui_qt-linux-x86_64.zip \
+            "$(artifact qt-linux-x86_64 mp3_downloader_gui_qt)"
+          zip -j release/mp3_downloader_gui_qt-windows-x86_64.zip \
+            "$(artifact qt-windows-x86_64 mp3_downloader_gui_qt.exe)"
+          zip -j release/mp3_downloader_gui_qt-macos-arm64.zip \
+            "$(artifact qt-macos-arm64 mp3_downloader_gui_qt)"
+          cp "$(artifact android-apk mp3-downloader-release.apk)" \
+            "release/mp3-downloader-${version}.apk"
           ls -lh release/
 
       - name: Create GitHub Release
