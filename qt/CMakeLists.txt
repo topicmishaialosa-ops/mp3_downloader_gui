@@ -45,4 +45,14 @@ if(WIN32)
     set_target_properties(mp3_downloader_gui_qt PROPERTIES WIN32_EXECUTABLE TRUE)
 endif()
 
+if(APPLE)
+    set_target_properties(mp3_downloader_gui_qt PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER net.mp3party.downloader.qt
+        MACOSX_BUNDLE_BUNDLE_NAME "MP3 Downloader Qt"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    )
+endif()
+
 install(TARGETS mp3_downloader_gui_qt RUNTIME DESTINATION bin)

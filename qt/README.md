@@ -16,10 +16,10 @@ Desktop-версия на **Qt6** (C++): MP3Party, DriveMusic, YouTube (yt-dlp).
 
 | Платформа | Скрипт | Результат |
 |-----------|--------|-----------|
-| Linux | [`scripts/build-linux.sh`](scripts/build-linux.sh) | `dist/linux/mp3_downloader_gui_qt` |
-| macOS | [`scripts/build-macos.sh`](scripts/build-macos.sh) | `dist/macos/mp3_downloader_gui_qt` |
-| Windows | [`scripts/build-windows.bat`](scripts/build-windows.bat) | `dist/windows/mp3_downloader_gui_qt.exe` |
-| Android (Linux/Mac) | [`scripts/build-android.sh`](scripts/build-android.sh) | `../dist/android/…` (Kotlin) |
+| Linux | [`scripts/build-linux.sh`](scripts/build-linux.sh) | `dist/linux/portable/` |
+| macOS | [`scripts/build-macos.sh`](scripts/build-macos.sh) | `dist/macos/portable/*.app` |
+| Windows | [`scripts/build-windows.bat`](scripts/build-windows.bat) | `dist/windows/portable/` |
+| Android (Linux/Mac) | [`scripts/build-android.sh`](scripts/build-android.sh) | `../dist/android/mp3-downloader-release.apk` |
 | Android (Windows) | [`scripts/build-android.bat`](scripts/build-android.bat) | то же |
 
 ## Требования

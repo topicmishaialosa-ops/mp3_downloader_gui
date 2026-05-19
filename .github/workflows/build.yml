@@ -109,17 +109,17 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            cmake ninja-build g++ \
+            cmake ninja-build g++ patchelf \
             qt6-base-dev qt6-multimedia-dev \
             libxkbcommon-dev
 
-      - name: Build Qt (Linux)
+      - name: Build Qt (Linux portable)
         run: ./qt/scripts/build-linux.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: qt-linux-x86_64
-          path: qt/dist/linux/mp3_downloader_gui_qt
+          name: qt-linux-portable
+          path: qt/dist/linux/portable/
           if-no-files-found: error
 
   qt-windows:
@@ -136,14 +136,14 @@ jobs:
           arch: win64_msvc2019_64
           modules: qtmultimedia
 
-      - name: Build Qt (Windows)
+      - name: Build Qt (Windows portable)
         shell: cmd
         run: qt\scripts\build-windows.bat
 
       - uses: actions/upload-artifact@v4
         with:
-          name: qt-windows-x86_64
-          path: qt/dist/windows/mp3_downloader_gui_qt.exe
+          name: qt-windows-portable
+          path: qt/dist/windows/portable/
           if-no-files-found: error
 
   qt-macos:
@@ -160,13 +160,13 @@ jobs:
           arch: clang_64
           modules: qtmultimedia
 
-      - name: Build Qt (macOS)
+      - name: Build Qt (macOS .app bundle)
         run: ./qt/scripts/build-macos.sh
 
       - uses: actions/upload-artifact@v4
         with:
-          name: qt-macos-arm64
-          path: qt/dist/macos/mp3_downloader_gui_qt
+          name: qt-macos-portable
+          path: qt/dist/macos/portable/
           if-no-files-found: error
 
   android:
@@ -195,7 +195,7 @@ jobs:
               -dname "CN=MP3 Downloader, OU=CI, O=MP3Party, L=Unknown, ST=Unknown, C=US"
           fi
 
-      - name: Build APK
+      - name: Build APK (Kotlin / Android)
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
           GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-home
@@ -227,7 +227,7 @@ jobs:
         with:
           path: artifacts
 
-      - name: Package zips
+      - name: Package release assets
         shell: bash
         run: |
           set -eo pipefail
@@ -236,35 +236,64 @@ jobs:
           ref_name="${GITHUB_REF_NAME:-}"
           version="${ref_name#v}"
           if [ -z "$version" ] || [ "$version" = "$ref_name" ]; then
-            version="1.4.3"
+            version="1.4.6"
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
 
-          artifact() {
+          artifact_file() {
             local dir="$1" file="$2"
             local path="artifacts/${dir}/${file}"
             if [ ! -f "$path" ]; then
-              echo "Missing artifact: $path"
+              echo "Missing artifact file: $path"
               find artifacts -type f 2>/dev/null || true
               exit 1
             fi
             printf '%s' "$path"
           }
 
-          zip -j release/mp3_downloader_gui-linux-x86_64.zip \
-            "$(artifact rust-linux-x86_64 mp3_downloader_gui)"
-          zip -j release/mp3_downloader_gui-windows-x86_64.zip \
-            "$(artifact rust-windows-x86_64 mp3_downloader_gui.exe)"
-          zip -j release/mp3_downloader_gui-macos-arm64.zip \
-            "$(artifact rust-macos-arm64 mp3_downloader_gui)"
-          zip -j release/mp3_downloader_gui_qt-linux-x86_64.zip \
-            "$(artifact qt-linux-x86_64 mp3_downloader_gui_qt)"
-          zip -j release/mp3_downloader_gui_qt-windows-x86_64.zip \
-            "$(artifact qt-windows-x86_64 mp3_downloader_gui_qt.exe)"
-          zip -j release/mp3_downloader_gui_qt-macos-arm64.zip \
-            "$(artifact qt-macos-arm64 mp3_downloader_gui_qt)"
-          cp "$(artifact android-apk mp3-downloader-release.apk)" \
-            "release/mp3-downloader-${version}.apk"
+          artifact_dir() {
+            local dir="$1"
+            local path="artifacts/${dir}"
+            if [ ! -d "$path" ]; then
+              echo "Missing artifact dir: $path"
+              find artifacts -maxdepth 2 -type d 2>/dev/null || true
+              exit 1
+            fi
+            printf '%s' "$path"
+          }
+
+          zip_one() {
+            local zip_path="$1" file_path="$2"
+            zip -j "$zip_path" "$file_path"
+          }
+
+          zip_dir() {
+            local zip_path="$1" dir_path="$2"
+            local abs_zip="${GITHUB_WORKSPACE}/${zip_path}"
+            (cd "$dir_path" && zip -r "$abs_zip" .)
+          }
+
+          # Rust desktop (single binary)
+          zip_one release/mp3_downloader_gui-linux-x86_64.zip \
+            "$(artifact_file rust-linux-x86_64 mp3_downloader_gui)"
+          zip_one release/mp3_downloader_gui-windows-x86_64.zip \
+            "$(artifact_file rust-windows-x86_64 mp3_downloader_gui.exe)"
+          zip_one release/mp3_downloader_gui-macos-arm64.zip \
+            "$(artifact_file rust-macos-arm64 mp3_downloader_gui)"
+
+          # Qt desktop (portable: DLL / .app / libs+plugins)
+          zip_dir release/mp3_downloader_gui_qt-linux-x86_64-portable.zip \
+            "$(artifact_dir qt-linux-portable)"
+          zip_dir release/mp3_downloader_gui_qt-windows-x86_64-portable.zip \
+            "$(artifact_dir qt-windows-portable)"
+          zip_dir release/mp3_downloader_gui_qt-macos-arm64-portable.zip \
+            "$(artifact_dir qt-macos-portable)"
+
+          # Android (Kotlin; qt/scripts/build-android — тот же APK)
+          apk="$(artifact_file android-apk mp3-downloader-release.apk)"
+          cp "$apk" "release/mp3-downloader-${version}.apk"
+          cp "$apk" "release/mp3-downloader-android-${version}.apk"
+
           ls -lh release/
 
       - name: Create GitHub Release

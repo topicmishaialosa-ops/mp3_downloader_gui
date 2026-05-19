@@ -10,13 +10,14 @@
 
 | Файл | Описание |
 |------|----------|
-| `mp3-downloader-release.apk` | Android |
-| `mp3_downloader_gui-linux-x86_64.zip` | Desktop Rust (Linux) |
-| `mp3_downloader_gui-windows-x86_64.zip` | Desktop Rust (Windows `.exe`) |
-| `mp3_downloader_gui_qt-linux-x86_64.zip` | Desktop Qt (Linux) |
-| `mp3_downloader_gui_qt-windows-x86_64.zip` | Desktop Qt (Windows) |
-| `mp3_downloader_gui_qt-macos-arm64.zip` | Desktop Qt (macOS Apple Silicon) |
-| `mp3_downloader_gui-macos-arm64.zip` | Desktop Rust (macOS) |
+| `mp3-downloader-<версия>.apk` | Android (Kotlin; сборка из `android/` и `qt/scripts/build-android`) |
+| `mp3-downloader-android-<версия>.apk` | то же APK (алиас) |
+| `mp3_downloader_gui-linux-x86_64.zip` | Desktop **Rust** (Linux, один бинарник) |
+| `mp3_downloader_gui-windows-x86_64.zip` | Desktop **Rust** (Windows `.exe`) |
+| `mp3_downloader_gui-macos-arm64.zip` | Desktop **Rust** (macOS Apple Silicon) |
+| `mp3_downloader_gui_qt-linux-x86_64-portable.zip` | Desktop **Qt** (Linux: бинарник + `lib/` + `plugins/`) |
+| `mp3_downloader_gui_qt-windows-x86_64-portable.zip` | Desktop **Qt** (Windows: `.exe` + Qt DLL через windeployqt) |
+| `mp3_downloader_gui_qt-macos-arm64-portable.zip` | Desktop **Qt** (macOS: `.app` с frameworks) |
 
 Сборки создаёт **GitHub Actions** (`.github/workflows/build.yml`):
 - при push в `master` — артефакты в Actions;
@@ -129,9 +130,10 @@ export ANDROID_HOME=~/Android/Sdk
 
 | Платформа | Скрипт | Результат |
 |-----------|--------|-----------|
-| Linux | `build-linux.sh` | `qt/dist/linux/mp3_downloader_gui_qt` |
-| Windows | `build-windows.bat` | `qt/dist/windows/…exe` |
-| macOS | `build-macos.sh` | `qt/dist/macos/…` |
+| Linux | `build-linux.sh` | `qt/dist/linux/portable/` (бинарник + Qt libs/plugins) |
+| Windows | `build-windows.bat` | `qt/dist/windows/portable/` (exe + DLL) |
+| macOS | `build-macos.sh` | `qt/dist/macos/portable/*.app` |
+| Android | `build-android.sh` | `dist/android/mp3-downloader-release.apk` (Kotlin) |
 
 Подробнее: [qt/README.md](qt/README.md).
 

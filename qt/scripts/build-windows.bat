@@ -24,7 +24,18 @@ if not exist "%SRC%" (
     exit /b 1
 )
 
-copy /Y "%SRC%" "%OUT%\%BIN%"
-echo Готово: %OUT%\%BIN%
-dir "%OUT%\%BIN%"
+set "PORTABLE=%OUT%\portable"
+if not exist "%PORTABLE%" mkdir "%PORTABLE%"
+copy /Y "%SRC%" "%PORTABLE%\%BIN%"
+
+where windeployqt >nul 2>&1
+if %ERRORLEVEL%==0 (
+    echo ==^> windeployqt
+    windeployqt --release --no-translations "%PORTABLE%\%BIN%"
+) else (
+    echo Предупреждение: windeployqt не в PATH — только .exe без Qt DLL
+)
+
+echo Готово: %PORTABLE%\%BIN%
+dir "%PORTABLE%"
 endlocal
