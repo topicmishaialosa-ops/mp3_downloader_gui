@@ -1,0 +1,16 @@
+/target/
+**/build/
+**/.gradle/
+**/local.properties
+**/.idea/
+*.iml
+downloads/
+*.apk
+*.aab
+.DS_Store
+*.log
+.env
+.env.*
+tmp_page.html
+base.js
+common.js

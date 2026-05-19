@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MP3Party</string>
+    <string name="app_subtitle">Поиск, yt-dlp и плеер</string>
+    <string name="search_title">Поиск</string>
+    <string name="search_hint">Исполнитель или название…</string>
+    <string name="search">Найти</string>
+    <string name="download">Скачать</string>
+    <string name="stream">Слушать онлайн</string>
+    <string name="downloading">Загрузка…</string>
+    <string name="status_ready">Выберите источник и введите запрос</string>
+    <string name="results_title">Результаты</string>
+    <string name="empty_title">Пока пусто</string>
+    <string name="empty_message">Найдите трек или откройте\nвкладку «Мои файлы»</string>
+    <string name="files_folder">Файлы в папке Music приложения</string>
+    <string name="nav_search">Поиск</string>
+    <string name="nav_library">Мои файлы</string>
+    <string name="library_title">Мои файлы</string>
+    <string name="open_folder">Открыть папку</string>
+    <string name="play">Воспроизвести</string>
+    <string name="fullscreen">На весь экран</string>
+    <string name="close">Закрыть</string>
+    <string name="library_empty">Скачанных файлов пока нет</string>
+    <string name="ytdlp_init">Инициализация yt-dlp…</string>
+    <string name="ytdlp_ready">yt-dlp готов</string>
+    <string name="ytdlp_error">yt-dlp: %s</string>
+    <string name="folder_copy_hint">Путь скопирован в буфер:\n%s</string>
+</resources>
