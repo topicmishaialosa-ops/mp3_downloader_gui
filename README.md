@@ -2,69 +2,138 @@
 
 Кроссплатформенный поиск и скачивание музыки с **MP3Party**, **DriveMusic** и **YouTube** (через yt-dlp).
 
+[![Build](https://github.com/topicmishaialosa-ops/mp3_downloader_gui/actions/workflows/build.yml/badge.svg)](https://github.com/topicmishaialosa-ops/mp3_downloader_gui/actions/workflows/build.yml)
+
+## Готовые сборки (Releases)
+
+Скачайте бинарники на странице **[Releases](https://github.com/topicmishaialosa-ops/mp3_downloader_gui/releases)** (без сборки):
+
+| Файл | Описание |
+|------|----------|
+| `mp3-downloader-release.apk` | Android |
+| `mp3_downloader_gui-linux-x86_64.zip` | Desktop Rust (Linux) |
+| `mp3_downloader_gui-windows-x86_64.zip` | Desktop Rust (Windows `.exe`) |
+| `mp3_downloader_gui_qt-linux-x86_64.zip` | Desktop Qt (Linux) |
+| `mp3_downloader_gui_qt-windows-x86_64.zip` | Desktop Qt (Windows) |
+| `mp3_downloader_gui_qt-macos-arm64.zip` | Desktop Qt (macOS Apple Silicon) |
+| `mp3_downloader_gui-macos-arm64.zip` | Desktop Rust (macOS) |
+
+Сборки создаёт **GitHub Actions** (`.github/workflows/build.yml`):
+- при push в `master` — артефакты в Actions;
+- при теге `v*` (например `v1.4.3`) — автоматический **Release**;
+- вручную: Actions → Build → Run workflow → «Создать GitHub Release».
+
+Для Windows также нужен [yt-dlp](https://github.com/yt-dlp/yt-dlp) в PATH (YouTube). Для перемотки в Rust-версии удобен [mpv](https://mpv.io/).
+
 ## Компоненты
 
 | Платформа | Стек | Папка |
 |-----------|------|-------|
-| Desktop (Rust) | egui/eframe | `src/` |
+| Desktop (Rust) | egui/eframe, rodio | `src/` |
 | Desktop (Qt) | Qt6, C++ | [`qt/`](qt/) |
-| Android | Kotlin, ExoPlayer, youtubedl-android | `android/` |
+| Android | Kotlin, ExoPlayer | `android/` |
 
 ## Возможности
 
 - Поиск и скачивание MP3/MP4
-- Библиотека локальных файлов, открытие папки музыки
-- Встроенный плеер с перемоткой
-- Стриминг YouTube без полного скачивания
-- Тёмная/светлая тема (desktop)
+- Библиотека «Мои файлы», встроенный плеер, стриминг YouTube
+- DriveMusic: URL страницы только из поиска (без хардкода жанра)
+
+## Компиляторы и зависимости
+
+### Общее
+
+| Инструмент | Версия | Зачем |
+|------------|--------|--------|
+| **Git** | любая | клонирование репозитория |
+
+### Rust (egui) — Linux
+
+| Пакет (Arch) | Зачем |
+|--------------|--------|
+| `rust` / **rustup** | компилятор Rust |
+| `gcc` | линковка Linux |
+| `alsa-lib` | звук (rodio), runtime |
+| `pkgconf` | сборка зависимостей |
+
+```bash
+sudo pacman -S rustup base-devel alsa-lib pkgconf
+# или только rust из репозитория для локальной сборки Linux
+```
+
+### Rust → Windows `.exe` на Linux (без Docker)
+
+| Инструмент | Зачем |
+|------------|--------|
+| **rustup** | таргет `x86_64-pc-windows-msvc` |
+| **cargo-xwin** | MSVC SDK и линковка без Visual Studio |
+| `clang` | зависимость xwin (обычно уже есть) |
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source "$HOME/.cargo/env"
+cargo install cargo-xwin --locked
+./scripts/build-windows-cross.sh
+```
+
+Результат: `dist/windows/mp3_downloader_gui.exe`
+
+### Rust — Windows / macOS (нативно)
+
+| ОС | Инструменты |
+|----|-------------|
+| **Windows** | [Rust](https://rustup.rs/), Visual Studio Build Tools *или* `cargo install cargo-xwin` → `scripts/build-windows.bat` |
+| **macOS** | Xcode Command Line Tools, rustup → `scripts/build-macos.sh` |
+
+### Qt (C++) — Linux
+
+| Пакет (Arch) | Зачем |
+|--------------|--------|
+| `qt6-base` `qt6-multimedia` | Qt6 Widgets + плеер |
+| `cmake` `ninja` | сборка |
+| `gcc` | компилятор C++ |
+
+```bash
+sudo pacman -S qt6-base qt6-multimedia cmake ninja gcc
+./qt/scripts/build-linux.sh
+```
+
+Qt на **Windows** / **macOS** — собирайте на соответствующей ОС (`qt/scripts/build-windows.bat`, `build-macos.sh`).
+
+### Android APK
+
+| Инструмент | Зачем |
+|------------|--------|
+| **JDK 17+** | Gradle |
+| **Android SDK** | `ANDROID_HOME` |
+| ~8–12 ГБ диска | Gradle + SDK |
+
+```bash
+export ANDROID_HOME=~/Android/Sdk
+./scripts/build-android.sh
+```
 
 ## Скрипты сборки
 
-### Rust (egui) — `scripts/`
+### Rust — `scripts/`
 
 | Платформа | Скрипт | Результат |
 |-----------|--------|-----------|
-| Linux | [`scripts/build-linux.sh`](scripts/build-linux.sh) | `dist/linux/mp3_downloader_gui` |
-| macOS | [`scripts/build-macos.sh`](scripts/build-macos.sh) | `dist/macos/mp3_downloader_gui` |
-| Windows | [`scripts/build-windows.bat`](scripts/build-windows.bat) | `dist/windows/mp3_downloader_gui.exe` |
-| Android (Linux/Mac) | [`scripts/build-android.sh`](scripts/build-android.sh) | `dist/android/mp3-downloader-release.apk` |
-| Android (Windows) | [`scripts/build-android.bat`](scripts/build-android.bat) | `dist/android/mp3-downloader-release.apk` |
+| Linux | `build-linux.sh` | `dist/linux/mp3_downloader_gui` |
+| Windows (на Linux, без Docker) | **`build-windows-cross.sh`** | `dist/windows/mp3_downloader_gui.exe` |
+| Windows (на Windows) | `build-windows.bat` | `dist/windows/mp3_downloader_gui.exe` |
+| macOS | `build-macos.sh` | `dist/macos/mp3_downloader_gui` |
+| Android | `build-android.sh` / `.bat` | `dist/android/mp3-downloader-release.apk` |
 
-### Qt (C++) — [`qt/scripts/`](qt/scripts/)
+### Qt — `qt/scripts/`
 
 | Платформа | Скрипт | Результат |
 |-----------|--------|-----------|
-| Linux | [`qt/scripts/build-linux.sh`](qt/scripts/build-linux.sh) | `qt/dist/linux/mp3_downloader_gui_qt` |
-| macOS | [`qt/scripts/build-macos.sh`](qt/scripts/build-macos.sh) | `qt/dist/macos/mp3_downloader_gui_qt` |
-| Windows | [`qt/scripts/build-windows.bat`](qt/scripts/build-windows.bat) | `qt/dist/windows/mp3_downloader_gui_qt.exe` |
-| Android | [`qt/scripts/build-android.sh`](qt/scripts/build-android.sh) | тот же Kotlin APK (см. корень) |
+| Linux | `build-linux.sh` | `qt/dist/linux/mp3_downloader_gui_qt` |
+| Windows | `build-windows.bat` | `qt/dist/windows/…exe` |
+| macOS | `build-macos.sh` | `qt/dist/macos/…` |
 
 Подробнее: [qt/README.md](qt/README.md).
-
-### Linux / macOS (shell)
-
-```bash
-chmod +x scripts/*.sh
-./scripts/build-linux.sh    # только Linux
-./scripts/build-macos.sh    # только на Mac
-./scripts/build-android.sh  # нужен Android SDK (ANDROID_HOME)
-```
-
-### Windows (cmd)
-
-```bat
-scripts\build-windows.bat
-scripts\build-android.bat
-```
-
-Требования: [Rust](https://rustup.rs/), для Android — [Android SDK](https://developer.android.com/studio) и `ANDROID_HOME`.
-
-## Ручная сборка
-
-```bash
-cargo build --release
-cd android && ./gradlew assembleRelease
-```
 
 ## Лицензия
 
