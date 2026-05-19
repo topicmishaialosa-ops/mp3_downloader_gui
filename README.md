@@ -35,6 +35,4 @@ cd android
 
 APK: `android/app/build/outputs/apk/release/app-release.apk`
 
-## Лицензия
 
-Для личного использования. Соблюдайте авторские права и условия источников.
