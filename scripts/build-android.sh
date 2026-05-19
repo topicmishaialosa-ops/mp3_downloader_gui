@@ -19,6 +19,24 @@ fi
 
 mkdir -p "$OUT_DIR" "$GRADLE_USER_HOME"
 
+# Release signing uses ~/.android/debug.keystore unless ANDROID_KEYSTORE_PATH is set.
+if [[ -z "${ANDROID_KEYSTORE_PATH:-}" ]]; then
+  debug_ks="${HOME}/.android/debug.keystore"
+  if [[ ! -f "$debug_ks" ]]; then
+    echo "==> Creating debug keystore for release APK: $debug_ks"
+    mkdir -p "${HOME}/.android"
+    keytool -genkeypair -v \
+      -keystore "$debug_ks" \
+      -storepass android \
+      -alias androiddebugkey \
+      -keypass android \
+      -keyalg RSA \
+      -keysize 2048 \
+      -validity 10000 \
+      -dname "CN=MP3 Downloader, OU=CI, O=MP3Party, L=Unknown, ST=Unknown, C=US"
+  fi
+fi
+
 echo "==> Android: ./gradlew assembleRelease"
 cd "$ANDROID_DIR"
 chmod +x ./gradlew

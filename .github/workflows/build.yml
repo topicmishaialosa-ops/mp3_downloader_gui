@@ -184,6 +184,17 @@ jobs:
       - name: Setup Gradle cache
         uses: gradle/actions/setup-gradle@v4
 
+      - name: Prepare release signing keystore
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=MP3 Downloader, OU=CI, O=MP3Party, L=Unknown, ST=Unknown, C=US"
+          fi
+
       - name: Build APK
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
