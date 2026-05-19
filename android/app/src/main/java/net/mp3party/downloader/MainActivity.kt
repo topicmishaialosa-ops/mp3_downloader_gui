@@ -162,13 +162,22 @@ class MainActivity : AppCompatActivity() {
         playerBarBinding.positionText.text = formatMs(positionMs)
         playerBarBinding.durationText.text =
             if (durationMs > 0) formatMs(durationMs) else "--:--"
-        if (durationMs > 0) {
-            val durF = durationMs.toFloat()
-            if (playerBarBinding.seekSlider.valueTo != durF) {
-                playerBarBinding.seekSlider.valueTo = durF
+        if (durationMs <= 0 || seekUserDragging) return
+
+        val slider = playerBarBinding.seekSlider
+        val durF = durationMs.toFloat().coerceAtLeast(1f)
+        val posF = positionMs.toFloat().coerceIn(0f, durF)
+        try {
+            if (slider.valueFrom != 0f) slider.valueFrom = 0f
+            if (slider.valueTo != durF) {
+                if (slider.value > durF) slider.value = durF
+                slider.valueTo = durF
             }
-            playerBarBinding.seekSlider.value =
-                positionMs.toFloat().coerceIn(0f, durF)
+            if (kotlin.math.abs(slider.value - posF) > 500f) {
+                slider.value = posF
+            }
+        } catch (_: IllegalStateException) {
+            // длительность ещё неизвестна или слайдер в переходном состоянии
         }
     }
 
