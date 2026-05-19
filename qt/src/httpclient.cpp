@@ -1,0 +1,90 @@
+#include "httpclient.h"
+
+#include <QEventLoop>
+#include <QFile>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QTimer>
+
+#include "appconstants.h"
+
+using namespace AppConstants;
+
+static QNetworkRequest makeRequest(const QUrl &url,
+                                   const QMap<QString, QString> &headers) {
+    QNetworkRequest req(url);
+    req.setHeader(QNetworkRequest::UserAgentHeader, kUserAgent);
+    for (auto it = headers.constBegin(); it != headers.constEnd(); ++it) {
+        req.setRawHeader(it.key().toUtf8(), it.value().toUtf8());
+    }
+    return req;
+}
+
+HttpClient::Response HttpClient::get(const QUrl &url,
+                                     const QMap<QString, QString> &headers,
+                                     int timeoutMs) {
+    Response out;
+    QNetworkAccessManager nam;
+    QEventLoop loop;
+    QTimer timer;
+    timer.setSingleShot(true);
+
+    auto *reply = nam.get(makeRequest(url, headers));
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+    timer.start(timeoutMs);
+    loop.exec();
+
+    if (!timer.isActive()) {
+        reply->abort();
+        out.error = QStringLiteral("Таймаут запроса");
+        reply->deleteLater();
+        return out;
+    }
+
+    out.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (reply->error() != QNetworkReply::NoError) {
+        out.error = reply->errorString();
+    } else {
+        out.body = reply->readAll();
+    }
+    reply->deleteLater();
+    return out;
+}
+
+HttpClient::Response HttpClient::downloadToFile(
+    const QUrl &url,
+    const QString &destPath,
+    const QMap<QString, QString> &headers,
+    std::function<bool(qint64, qint64)> progress) {
+    Q_UNUSED(progress);
+    Response out;
+    QNetworkAccessManager nam;
+    QEventLoop loop;
+
+    auto *reply = nam.get(makeRequest(url, headers));
+    QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+    loop.exec();
+
+    out.status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    if (reply->error() != QNetworkReply::NoError) {
+        out.error = reply->errorString();
+        reply->deleteLater();
+        return out;
+    }
+
+    QFile file(destPath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        out.error = QStringLiteral("Не удалось создать файл");
+        reply->deleteLater();
+        return out;
+    }
+    file.write(reply->readAll());
+    file.close();
+    if (out.status == 0) {
+        out.status = 200;
+    }
+    reply->deleteLater();
+    return out;
+}

@@ -6,7 +6,8 @@
 
 | Платформа | Стек | Папка |
 |-----------|------|-------|
-| Desktop | Rust, egui/eframe | `src/` |
+| Desktop (Rust) | egui/eframe | `src/` |
+| Desktop (Qt) | Qt6, C++ | [`qt/`](qt/) |
 | Android | Kotlin, ExoPlayer, youtubedl-android | `android/` |
 
 ## Возможности
@@ -19,15 +20,26 @@
 
 ## Скрипты сборки
 
-Запускайте из корня репозитория или двойным кликом из `scripts/`.
+### Rust (egui) — `scripts/`
 
 | Платформа | Скрипт | Результат |
 |-----------|--------|-----------|
-| **Linux** (desktop) | [`scripts/build-linux.sh`](scripts/build-linux.sh) | `dist/linux/mp3_downloader_gui` |
-| **macOS** (desktop) | [`scripts/build-macos.sh`](scripts/build-macos.sh) | `dist/macos/mp3_downloader_gui` |
-| **Windows** (desktop) | [`scripts/build-windows.bat`](scripts/build-windows.bat) | `dist/windows/mp3_downloader_gui.exe` |
-| **Android** (Linux / macOS) | [`scripts/build-android.sh`](scripts/build-android.sh) | `dist/android/mp3-downloader-release.apk` |
-| **Android** (Windows) | [`scripts/build-android.bat`](scripts/build-android.bat) | `dist/android/mp3-downloader-release.apk` |
+| Linux | [`scripts/build-linux.sh`](scripts/build-linux.sh) | `dist/linux/mp3_downloader_gui` |
+| macOS | [`scripts/build-macos.sh`](scripts/build-macos.sh) | `dist/macos/mp3_downloader_gui` |
+| Windows | [`scripts/build-windows.bat`](scripts/build-windows.bat) | `dist/windows/mp3_downloader_gui.exe` |
+| Android (Linux/Mac) | [`scripts/build-android.sh`](scripts/build-android.sh) | `dist/android/mp3-downloader-release.apk` |
+| Android (Windows) | [`scripts/build-android.bat`](scripts/build-android.bat) | `dist/android/mp3-downloader-release.apk` |
+
+### Qt (C++) — [`qt/scripts/`](qt/scripts/)
+
+| Платформа | Скрипт | Результат |
+|-----------|--------|-----------|
+| Linux | [`qt/scripts/build-linux.sh`](qt/scripts/build-linux.sh) | `qt/dist/linux/mp3_downloader_gui_qt` |
+| macOS | [`qt/scripts/build-macos.sh`](qt/scripts/build-macos.sh) | `qt/dist/macos/mp3_downloader_gui_qt` |
+| Windows | [`qt/scripts/build-windows.bat`](qt/scripts/build-windows.bat) | `qt/dist/windows/mp3_downloader_gui_qt.exe` |
+| Android | [`qt/scripts/build-android.sh`](qt/scripts/build-android.sh) | тот же Kotlin APK (см. корень) |
+
+Подробнее: [qt/README.md](qt/README.md).
 
 ### Linux / macOS (shell)
 

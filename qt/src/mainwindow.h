@@ -1,0 +1,69 @@
+#pragma once
+
+#include <QMainWindow>
+#include <QVector>
+
+#include "downloadmanager.h"
+#include "downloadsource.h"
+#include "libraryscanner.h"
+#include "playercontroller.h"
+#include "track.h"
+
+class QComboBox;
+class QLineEdit;
+class QListWidget;
+class QPlainTextEdit;
+class QProgressBar;
+class QPushButton;
+class QSlider;
+class QTabWidget;
+class QLabel;
+class QWidget;
+
+class MainWindow : public QMainWindow {
+    Q_OBJECT
+public:
+    explicit MainWindow(QWidget *parent = nullptr);
+
+private slots:
+    void onSearch();
+    void onBrowseFolder();
+    void onDownloadSelected();
+    void onDownloadAll();
+    void onStreamSelected();
+    void onRefreshLibrary();
+    void onOpenFolder();
+    void onLog(const QString &line);
+    void onPlayPause();
+    void onStopPlayer();
+
+private:
+    void setupUi();
+    void applyTheme(bool dark);
+    void refreshLibrary();
+    void enqueueTracks(const QList<class QListWidgetItem *> &items, bool downloadOnly);
+    void startStream(const Track &track);
+    DownloadSource currentSource() const;
+    YtFormat currentYtFormat() const;
+
+    QTabWidget *m_tabs = nullptr;
+    QComboBox *m_sourceCombo = nullptr;
+    QComboBox *m_ytFormatCombo = nullptr;
+    QLineEdit *m_queryEdit = nullptr;
+    QLineEdit *m_folderEdit = nullptr;
+    QListWidget *m_resultsList = nullptr;
+    QListWidget *m_libraryList = nullptr;
+    QPlainTextEdit *m_logEdit = nullptr;
+    QProgressBar *m_progress = nullptr;
+    QPushButton *m_searchBtn = nullptr;
+    QLabel *m_playerTitle = nullptr;
+    QLabel *m_playerSubtitle = nullptr;
+    QSlider *m_seekSlider = nullptr;
+    QWidget *m_playerBar = nullptr;
+
+    PlayerController m_player;
+    DownloadManager m_downloads;
+    QVector<Track> m_tracks;
+    QVector<LocalMediaFile> m_library;
+    bool m_dark = true;
+};

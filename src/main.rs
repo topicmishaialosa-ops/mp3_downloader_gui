@@ -1,4 +1,9 @@
+mod library;
+mod player;
+
 use eframe::egui::{self, Color32, Frame, Margin, Rounding, Stroke, Vec2};
+use library::{list_downloads, LocalMedia};
+use player::{open_folder_in_file_manager, AudioPlayer};
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -31,7 +36,6 @@ static RE_DRIVEMUSIC_SEARCH: LazyLock<Regex> = LazyLock::new(|| {
     .unwrap()
 });
 
-const YTDLP_VENV_BIN: &str = "/home/krasava/yt-dlp-util/.yt-dlp-venv/bin/yt-dlp";
 const DRIVEMUSIC_BASE: &str = "https://ru.drivemusic.me";
 
 /// Минимальный размер MP3; меньше — считаем ошибкой (HTML/редирект) и удаляем
@@ -84,6 +88,12 @@ enum ParseResult {
 enum OutputMode {
     UrlParsing,
     Search,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum MainTab {
+    Search,
+    Library,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -354,6 +364,11 @@ struct LinkParserApp {
     download_source: DownloadSource,
     ytdlp_format: YtDlpFormat,
     is_dark_mode: bool,
+    main_tab: MainTab,
+    library_files: Vec<LocalMedia>,
+    player: AudioPlayer,
+    player_seek_request: Option<f64>,
+    stream_rx: Option<mpsc::Receiver<Result<(String, String, String, bool), String>>>,
 }
 
 impl Default for LinkParserApp {
@@ -384,6 +399,11 @@ impl Default for LinkParserApp {
             download_source: DownloadSource::Mp3Party,
             ytdlp_format: YtDlpFormat::Mp3,
             is_dark_mode: true,
+            main_tab: MainTab::Search,
+            library_files: Vec::new(),
+            player: AudioPlayer::default(),
+            player_seek_request: None,
+            stream_rx: None,
         }
     }
 }
@@ -843,19 +863,264 @@ impl LinkParserApp {
     }
 
     fn resolve_yt_dlp() -> Result<PathBuf, String> {
-        let venv = Path::new(YTDLP_VENV_BIN);
-        if venv.exists() {
-            return Ok(venv.to_path_buf());
-        }
-        if let Ok(out) = Command::new("which").arg("yt-dlp").output() {
-            if out.status.success() {
-                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return Ok(PathBuf::from(path));
+        let home = std::env::var("HOME").unwrap_or_default();
+        let candidates = [
+            format!("{}/yt-dlp-util/.yt-dlp-venv/bin/yt-dlp", home),
+            "yt-dlp".to_string(),
+        ];
+        for c in &candidates {
+            if c.contains('/') {
+                let p = Path::new(c);
+                if p.exists() {
+                    return Ok(p.to_path_buf());
+                }
+            } else if let Ok(out) = Command::new("which").arg(c).output() {
+                if out.status.success() {
+                    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    if !path.is_empty() {
+                        return Ok(PathBuf::from(path));
+                    }
                 }
             }
         }
-        Err("yt-dlp не найден. Проверьте /home/krasava/yt-dlp-util или установите yt-dlp в PATH.".into())
+        Err("yt-dlp не найден. Установите yt-dlp в PATH или venv в ~/yt-dlp-util.".into())
+    }
+
+    fn ytdlp_stream_url(track: &TrackInfo, format: YtDlpFormat) -> Result<String, String> {
+        let ytdlp = Self::resolve_yt_dlp()?;
+        let target = if track.url.starts_with("http://") || track.url.starts_with("https://") {
+            track.url.clone()
+        } else {
+            format!(
+                "ytsearch1:{} - {}",
+                track.artist.trim(),
+                track.title.trim()
+            )
+        };
+        let format_arg = match format {
+            YtDlpFormat::Mp3 => "bestaudio[ext=m4a]/bestaudio/best",
+            YtDlpFormat::Mp4 => "best[height<=720][ext=mp4]/best[ext=mp4]/best",
+        };
+        let output = Self::run_command_with_timeout(
+            {
+                let mut cmd = Command::new(&ytdlp);
+                Self::clear_proxy_env(&mut cmd);
+                Self::append_ytdlp_network_args(&mut cmd);
+                cmd.args(["--no-playlist", "-g", "-f", format_arg, &target]);
+                cmd
+            },
+            Duration::from_secs(60),
+        )?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+        }
+        let url = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .find(|l| l.starts_with("http://") || l.starts_with("https://"))
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if url.is_empty() {
+            Err("yt-dlp не вернул URL потока".into())
+        } else {
+            Ok(url)
+        }
+    }
+
+    fn drivemusic_stream_url(track: &TrackInfo) -> Result<String, String> {
+        let page = Self::drivemusic_page_url(track)?;
+        let client = Self::drivemusic_client()?;
+        let resp = client
+            .get(&page)
+            .header("User-Agent", BROWSER_USER_AGENT)
+            .header("Referer", DRIVEMUSIC_BASE)
+            .send()
+            .map_err(|e| e.to_string())?;
+        let body = resp.text().map_err(|e| e.to_string())?;
+        let urls = Self::drivemusic_extract_mp3_urls(&body);
+        urls.iter()
+            .find(|u| u.contains("/dl/online/"))
+            .cloned()
+            .or_else(|| urls.into_iter().next())
+            .ok_or_else(|| "На странице нет MP3 URL".to_string())
+    }
+
+    fn refresh_library(&mut self) {
+        self.library_files = list_downloads(&self.downloads_folder);
+    }
+
+    fn start_stream(&mut self, idx: usize) {
+        if idx >= self.tracks.len() {
+            return;
+        }
+        let track = self.tracks[idx].clone();
+        let source = self.download_source;
+        let fmt = self.ytdlp_format;
+        self.status = format!("🎧 Поток: {} — {}", track.artist, track.title);
+        self.loading = true;
+
+        let (tx, rx) = mpsc::channel();
+        self.stream_rx = Some(rx);
+        thread::spawn(move || {
+            let result = (|| {
+                let url = match source {
+                    DownloadSource::Mp3Party => {
+                        if track.url.starts_with("http") {
+                            track.url.clone()
+                        } else {
+                            format!("https://dl2.mp3party.net/online/{}.mp3", track.id)
+                        }
+                    }
+                    DownloadSource::DriveMusic => LinkParserApp::drivemusic_stream_url(&track)?,
+                    DownloadSource::YtDlp => LinkParserApp::ytdlp_stream_url(&track, fmt)?,
+                };
+                let title = format!("{} — {}", track.artist, track.title);
+                let sub = format!("Стрим {}", source.label());
+                let is_video = source == DownloadSource::YtDlp && fmt == YtDlpFormat::Mp4;
+                Ok((url, title, sub, is_video))
+            })();
+            let _ = tx.send(result);
+        });
+    }
+
+    fn show_player_bar(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        if !self.player.state.has_media {
+            return;
+        }
+        self.player.tick();
+        if let Some(seek) = self.player_seek_request.take() {
+            self.player.seek_to(seek);
+        }
+
+        theme.card().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let icon = if self.player.state.is_playing {
+                    "⏸"
+                } else {
+                    "▶"
+                };
+                if ui.add(theme.primary_button(icon)).clicked() {
+                    self.player.toggle_pause();
+                }
+                if ui.add(theme.neutral_button("⏹")).clicked() {
+                    self.player.stop();
+                }
+                ui.vertical(|ui| {
+                    ui.label(
+                        egui::RichText::new(&self.player.state.title)
+                            .strong()
+                            .color(theme.text_primary),
+                    );
+                    ui.label(
+                        egui::RichText::new(&self.player.state.subtitle)
+                            .size(11.0)
+                            .color(theme.text_muted),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("✕").clicked() {
+                        self.player.stop();
+                    }
+                });
+            });
+            if self.player.state.duration_secs > 0.0 || self.player.state.position_secs > 0.0 {
+                let dur = self.player.state.duration_secs.max(1.0);
+                let mut pos = self.player.state.position_secs.min(dur);
+                let pos_label = Self::format_duration(pos);
+                if ui
+                    .add(
+                        egui::Slider::new(&mut pos, 0.0..=dur)
+                            .text(pos_label)
+                            .trailing_fill(true),
+                    )
+                    .changed()
+                {
+                    self.player_seek_request = Some(pos);
+                }
+                ui.label(
+                    egui::RichText::new(format!(
+                        "{} / {}",
+                        Self::format_duration(self.player.state.position_secs),
+                        Self::format_duration(dur)
+                    ))
+                    .size(11.0)
+                    .color(theme.text_muted),
+                );
+            }
+        });
+    }
+
+    fn format_duration(secs: f64) -> String {
+        let s = secs.max(0.0) as u64;
+        format!("{}:{:02}", s / 60, s % 60)
+    }
+
+    fn show_library_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        theme.card().show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(theme.section_title("📂 Мои файлы"));
+                if ui.add(theme.neutral_button("🔄 Обновить")).clicked() {
+                    self.refresh_library();
+                }
+                if ui.add(theme.neutral_button("📂 Открыть папку")).clicked() {
+                    open_folder_in_file_manager(&self.downloads_folder);
+                }
+            });
+            ui.label(
+                egui::RichText::new(self.downloads_folder.display().to_string())
+                    .size(11.0)
+                    .color(theme.text_muted),
+            );
+            ui.add_space(6.0);
+
+            if self.library_files.is_empty() {
+                ui.label(
+                    egui::RichText::new("Скачанных файлов пока нет")
+                        .color(theme.text_muted),
+                );
+                return;
+            }
+
+            egui::ScrollArea::vertical()
+                .max_height(ui.available_height())
+                .show(ui, |ui| {
+                    let mut play_path: Option<PathBuf> = None;
+                    let mut play_title = String::new();
+                    let mut play_video = false;
+                    for f in &self.library_files {
+                        ui.horizontal(|ui| {
+                            let icon = if f.is_video { "🎬" } else { "🎵" };
+                            ui.label(icon);
+                            ui.vertical(|ui| {
+                                ui.label(&f.display_name);
+                                ui.label(
+                                    egui::RichText::new(format!(
+                                        "{} · {}",
+                                        Self::format_bytes(f.size_bytes),
+                                        f.path.file_name().unwrap_or_default().to_string_lossy()
+                                    ))
+                                    .size(10.0)
+                                    .color(theme.text_muted),
+                                );
+                            });
+                            if ui.add(theme.primary_button("▶")).clicked() {
+                                play_path = Some(f.path.clone());
+                                play_title = f.display_name.clone();
+                                play_video = f.is_video;
+                            }
+                        });
+                        ui.separator();
+                    }
+                    if let Some(path) = play_path {
+                        let _ = if play_video {
+                            self.player
+                                .play_url(path.to_str().unwrap_or(""), &play_title, "Видео", true)
+                        } else {
+                            self.player.play_file(&path, &play_title, false)
+                        };
+                    }
+                });
+        });
     }
 
     fn append_ytdlp_format_args(cmd: &mut Command, format: YtDlpFormat) {
@@ -2310,6 +2575,40 @@ impl eframe::App for LinkParserApp {
             ctx.request_repaint();
         }
 
+        if let Some(rx) = self.stream_rx.take() {
+            if let Ok(result) = rx.try_recv() {
+                self.loading = false;
+                match result {
+                    Ok((url, title, sub, is_video)) => {
+                        if let Err(e) = self.player.play_url(&url, &title, &sub, is_video) {
+                            self.status = format!("❌ Плеер: {}", e);
+                        } else {
+                            self.status = format!("🎧 {}", title);
+                        }
+                    }
+                    Err(e) => self.status = format!("❌ Стрим: {}", e),
+                }
+                ctx.request_repaint();
+            } else {
+                self.stream_rx = Some(rx);
+            }
+        }
+
+        if self.player.state.has_media {
+            self.player.tick();
+            ctx.request_repaint_after(Duration::from_millis(400));
+        }
+
+        egui::TopBottomPanel::bottom("player_bar")
+            .frame(Frame {
+                fill: theme.card_bg,
+                inner_margin: Margin::symmetric(12.0, 8.0),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                self.show_player_bar(ui, theme);
+            });
+
         egui::TopBottomPanel::top("header")
             .frame(Frame {
                 fill: theme.header_bg,
@@ -2424,7 +2723,26 @@ impl eframe::App for LinkParserApp {
                 ..Default::default()
             })
             .show(ctx, |ui| {
-                self.show_main_panel(ui, theme);
+                ui.horizontal(|ui| {
+                    if ui
+                        .selectable_label(self.main_tab == MainTab::Search, "🔎 Поиск")
+                        .clicked()
+                    {
+                        self.main_tab = MainTab::Search;
+                    }
+                    if ui
+                        .selectable_label(self.main_tab == MainTab::Library, "📂 Мои файлы")
+                        .clicked()
+                    {
+                        self.main_tab = MainTab::Library;
+                        self.refresh_library();
+                    }
+                });
+                ui.add_space(8.0);
+                match self.main_tab {
+                    MainTab::Search => self.show_main_panel(ui, theme),
+                    MainTab::Library => self.show_library_panel(ui, theme),
+                }
             });
     }
 }
@@ -2756,6 +3074,7 @@ impl LinkParserApp {
                     .show(ui, |ui| {
                         let mut to_remove: Option<usize> = None;
                         let mut to_download: Option<usize> = None;
+                        let mut to_stream: Option<usize> = None;
 
                         egui::Grid::new(format!("results_grid_{:?}", self.output_mode))
                             .striped(true)
@@ -2816,16 +3135,24 @@ impl LinkParserApp {
                                         if ui
                                             .add(
                                                 theme
-                                                    .success_button("⬇ Скачать")
-                                                    .min_size(Vec2::new(88.0, 24.0)),
+                                                    .success_button("⬇")
+                                                    .min_size(Vec2::new(36.0, 24.0)),
                                             )
-                                            .on_hover_text(format!(
-                                                "Скачать через {}",
-                                                src
-                                            ))
+                                            .on_hover_text(format!("Скачать через {}", src))
                                             .clicked()
                                         {
                                             to_download = Some(*i);
+                                        }
+                                        if ui
+                                            .add(
+                                                theme
+                                                    .neutral_button("▶")
+                                                    .min_size(Vec2::new(36.0, 24.0)),
+                                            )
+                                            .on_hover_text("Слушать онлайн")
+                                            .clicked()
+                                        {
+                                            to_stream = Some(*i);
                                         }
                                     });
 
@@ -2842,6 +3169,9 @@ impl LinkParserApp {
 
                         if let Some(idx) = to_download {
                             self.start_download(idx);
+                        }
+                        if let Some(idx) = to_stream {
+                            self.start_stream(idx);
                         }
                         if let Some(idx) = to_remove {
                             self.tracks.remove(idx);
