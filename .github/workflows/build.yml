@@ -223,6 +223,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -235,8 +237,9 @@ jobs:
 
           ref_name="${GITHUB_REF_NAME:-}"
           version="${ref_name#v}"
+          cargo_ver="$(grep -m1 '^version[[:space:]]*=' Cargo.toml | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')"
           if [ -z "$version" ] || [ "$version" = "$ref_name" ]; then
-            version="1.4.6"
+            version="${cargo_ver:-0.0.0}"
           fi
           echo "VERSION=${version}" >> "$GITHUB_ENV"
 

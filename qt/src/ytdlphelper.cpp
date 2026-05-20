@@ -5,6 +5,7 @@
 #include <QProcess>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QtGlobal>
 
 static QPair<QString, QString> splitTitle(const QString &full, const QString &channel) {
     const int idx = full.indexOf(QStringLiteral(" - "));
@@ -20,7 +21,12 @@ static QPair<QString, QString> splitTitle(const QString &full, const QString &ch
 QString YtDlpHelper::resolveBinary(QString *error) {
     QStringList candidates;
     const QString home = QDir::homePath();
-    candidates << home + QStringLiteral("/yt-dlp-util/.yt-dlp-venv/bin/yt-dlp");
+#if defined(Q_OS_WIN)
+    candidates << QDir(home).filePath(
+        QStringLiteral("yt-dlp-util/.yt-dlp-venv/Scripts/yt-dlp.exe"));
+#else
+    candidates << QDir(home).filePath(QStringLiteral("yt-dlp-util/.yt-dlp-venv/bin/yt-dlp"));
+#endif
     candidates << QStandardPaths::findExecutable(QStringLiteral("yt-dlp"));
     candidates << QStandardPaths::findExecutable(QStringLiteral("yt-dlp.exe"));
     for (const QString &p : candidates) {
@@ -29,7 +35,13 @@ QString YtDlpHelper::resolveBinary(QString *error) {
         }
     }
     if (error) {
-        *error = QStringLiteral("yt-dlp не найден. Установите yt-dlp в PATH или ~/yt-dlp-util/.yt-dlp-venv/");
+        *error = QStringLiteral(
+            "yt-dlp не найден. Установите yt-dlp в PATH"
+#if defined(Q_OS_WIN)
+            " или в %USERPROFILE%\\yt-dlp-util\\.yt-dlp-venv\\Scripts\\");
+#else
+            " или в ~/yt-dlp-util/.yt-dlp-venv/bin/");
+#endif
     }
     return {};
 }
@@ -123,8 +135,9 @@ QString YtDlpHelper::download(const Track &track,
     }
 
     const QString ext = format == YtFormat::Mp4 ? QStringLiteral("mp4") : QStringLiteral("mp3");
-    const QString archive = folder + QStringLiteral("/.yt-dlp-archive-") + ext;
-    const QString outTpl = folder + QStringLiteral("/%(title)s.%(ext)s");
+    const QString archive =
+        QDir(folder).filePath(QStringLiteral(".yt-dlp-archive-") + ext);
+    const QString outTpl = QDir(folder).filePath(QStringLiteral("%(title)s.%(ext)s"));
 
     QStringList args = {
         QStringLiteral("--force-ipv4"),

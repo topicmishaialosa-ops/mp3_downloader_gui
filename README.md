@@ -21,7 +21,7 @@
 
 Сборки создаёт **GitHub Actions** (`.github/workflows/build.yml`):
 - при push в `master` — артефакты в Actions;
-- при теге `v*` (например `v1.4.3`) — автоматический **Release**;
+- при теге `v*` (например `v1.4.7`) — автоматический **Release**;
 - вручную: Actions → Build → Run workflow → «Создать GitHub Release».
 
 Для Windows также нужен [yt-dlp](https://github.com/yt-dlp/yt-dlp) в PATH (YouTube). Для перемотки в Rust-версии удобен [mpv](https://mpv.io/).
@@ -39,6 +39,10 @@
 - Поиск и скачивание MP3/MP4
 - Библиотека «Мои файлы», встроенный плеер, стриминг YouTube
 - DriveMusic: URL страницы только из поиска (без хардкода жанра)
+
+### Папка загрузок по умолчанию (Rust)
+
+`~/mp3_downloader_gui/downloads` (Linux/macOS) или `%USERPROFILE%\mp3_downloader_gui\downloads` (Windows). На Windows сборка без отдельного окна консоли (`windows_subsystem`).
 
 ## Компиляторы и зависимости
 

@@ -188,6 +188,7 @@ impl AudioPlayer {
         ];
         if !is_video {
             args.push("--no-video".to_string());
+            args.push("--force-window=no".to_string());
         }
         args.push(format!(
             "--input-ipc-server={}",

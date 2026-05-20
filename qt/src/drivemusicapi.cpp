@@ -1,5 +1,6 @@
 #include "drivemusicapi.h"
 
+#include <QDir>
 #include <QFile>
 #include <QRegularExpression>
 #include <QSet>
@@ -138,10 +139,10 @@ QString DriveMusicApi::download(const Track &track,
     }
 
     const auto urls = extractMp3Urls(QString::fromUtf8(pageResp.body));
-    const QString dest = folder + QLatin1Char('/')
-                         + sanitizeName(track.artist + QStringLiteral(" - ") + track.title
-                                        + QStringLiteral("_") + track.id)
-                         + QStringLiteral(".mp3");
+    const QString dest = QDir(folder).filePath(
+        sanitizeName(track.artist + QStringLiteral(" - ") + track.title + QStringLiteral("_")
+                      + track.id)
+        + QStringLiteral(".mp3"));
 
     QMap<QString, QString> dlHeaders = headers;
     dlHeaders.insert(QStringLiteral("Referer"), page);

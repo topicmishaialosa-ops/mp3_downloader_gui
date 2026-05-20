@@ -1,3 +1,6 @@
+//! GUI: на Windows без отдельного консольного окна (подсистема windows).
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod library;
 mod player;
 
@@ -46,6 +49,16 @@ const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/53
 const MAX_LOG_LINES: usize = 2000;
 const YTDLP_SEARCH_TIMEOUT_SECS: u64 = 45;
 const LOADING_WATCHDOG_SECS: u64 = 90;
+
+fn default_downloads_folder() -> PathBuf {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        });
+    home.join("mp3_downloader_gui").join("downloads")
+}
 
 // ═══════════════════════════════════════════
 //  Типы данных
@@ -388,7 +401,7 @@ impl Default for LinkParserApp {
             error_count: 0,
             last_error: None,
             download_tasks: Vec::new(),
-            downloads_folder: PathBuf::from("./downloads"),
+            downloads_folder: default_downloads_folder(),
             next_download_id: 0,
             show_downloads: false,
             show_logs: false,

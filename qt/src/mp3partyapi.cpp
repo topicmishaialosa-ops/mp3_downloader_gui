@@ -1,5 +1,6 @@
 #include "mp3partyapi.h"
 
+#include <QDir>
 #include <QFile>
 #include <QRegularExpression>
 #include <QUrlQuery>
@@ -151,9 +152,8 @@ QString Mp3PartyApi::download(const Track &track,
 
     const QString page = QString::fromUtf8(pageResp.body);
     const auto candidates = downloadCandidates(page, track);
-    const QString dest =
-        folder + QLatin1Char('/')
-        + sanitizeName(track.artist + QStringLiteral(" - ") + track.title) + QStringLiteral(".mp3");
+    const QString dest = QDir(folder).filePath(
+        sanitizeName(track.artist + QStringLiteral(" - ") + track.title) + QStringLiteral(".mp3"));
 
     QMap<QString, QString> headers;
     headers.insert(QStringLiteral("Referer"), trackPage);

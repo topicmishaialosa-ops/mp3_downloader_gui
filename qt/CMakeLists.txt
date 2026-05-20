@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mp3_downloader_gui_qt VERSION 0.1.0 LANGUAGES CXX)
+project(mp3_downloader_gui_qt VERSION 1.4.7 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,7 @@ qt_add_executable(mp3_downloader_gui_qt
     src/track.h
     src/downloadsource.h
     src/appconstants.h
+    src/paths.h
     src/httpclient.cpp
     src/httpclient.h
     src/mp3partyapi.cpp

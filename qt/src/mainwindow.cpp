@@ -2,7 +2,6 @@
 
 #include <QApplication>
 #include <QComboBox>
-#include <QDir>
 #include <QLineEdit>
 #include <QListWidgetItem>
 #include <QDesktopServices>
@@ -24,11 +23,12 @@
 
 #include "drivemusicapi.h"
 #include "mp3partyapi.h"
+#include "paths.h"
 #include "ytdlphelper.h"
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setupUi();
-    m_folderEdit->setText(QDir::homePath() + QStringLiteral("/mp3_downloader_gui/downloads"));
+    m_folderEdit->setText(AppPaths::defaultDownloadFolder());
     m_downloads.setDownloadFolder(m_folderEdit->text());
     m_player.bindUi(m_playerTitle, m_playerSubtitle, m_seekSlider, m_playerBar);
     connect(&m_downloads, &DownloadManager::logLine, this, &MainWindow::onLog);
