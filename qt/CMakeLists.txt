@@ -56,4 +56,10 @@ if(APPLE)
     )
 endif()
 
-install(TARGETS mp3_downloader_gui_qt RUNTIME DESTINATION bin)
+if(APPLE)
+    install(TARGETS mp3_downloader_gui_qt
+        BUNDLE DESTINATION .
+        RUNTIME DESTINATION bin)
+else()
+    install(TARGETS mp3_downloader_gui_qt RUNTIME DESTINATION bin)
+endif()

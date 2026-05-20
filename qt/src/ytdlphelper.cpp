@@ -35,12 +35,14 @@ QString YtDlpHelper::resolveBinary(QString *error) {
         }
     }
     if (error) {
-        *error = QStringLiteral(
-            "yt-dlp не найден. Установите yt-dlp в PATH"
 #if defined(Q_OS_WIN)
-            " или в %USERPROFILE%\\yt-dlp-util\\.yt-dlp-venv\\Scripts\\");
+        *error = QStringLiteral(
+            "yt-dlp не найден. Установите yt-dlp в PATH "
+            "или в %USERPROFILE%\\yt-dlp-util\\.yt-dlp-venv\\Scripts\\");
 #else
-            " или в ~/yt-dlp-util/.yt-dlp-venv/bin/");
+        *error = QStringLiteral(
+            "yt-dlp не найден. Установите yt-dlp в PATH "
+            "или в ~/yt-dlp-util/.yt-dlp-venv/bin/");
 #endif
     }
     return {};
