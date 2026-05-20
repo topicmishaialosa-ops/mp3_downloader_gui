@@ -3,11 +3,11 @@
 #include <QObject>
 #include <QProcess>
 #include <QString>
+#include <QStringList>
 
 class QAudioOutput;
 class QLabel;
 class QMediaPlayer;
-class QStringList;
 class QSlider;
 class QUrl;
 class QVideoWidget;
