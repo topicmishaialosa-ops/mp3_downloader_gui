@@ -1009,6 +1009,63 @@ impl LinkParserApp {
             .or_else(|_| Self::prompt_and_install_yt_dlp())
     }
 
+    /// Предложить установить mpv перед стримом/видео. `true` — можно воспроизводить.
+    fn offer_mpv_ui(allow_skip: bool) -> bool {
+        if AudioPlayer::has_mpv() {
+            return true;
+        }
+
+        let install_dir = AudioPlayer::mpv_install_dir();
+        let msg = if cfg!(target_os = "linux") {
+            "Для стриминга и перемотки рекомендуется mpv.\n\n\
+             Установите: sudo pacman -S mpv  или  sudo apt install mpv\n\n\
+             «Да» — открыть mpv.io\n\
+             «Нет» — продолжить без mpv (без перемотки)"
+                .to_string()
+        } else {
+            format!(
+                "Для стриминга и перемотки рекомендуется mpv.\n\n\
+                 Скачать portable (~20 MB) в\n{}\n\n\
+                 «Нет» — без mpv (ограниченный режим)",
+                install_dir.display()
+            )
+        };
+
+        let ans = rfd::MessageDialog::new()
+            .set_title("mpv")
+            .set_description(msg)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+
+        if ans == rfd::MessageDialogResult::No {
+            return allow_skip;
+        }
+        if ans != rfd::MessageDialogResult::Yes {
+            return false;
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            let _ = Command::new("xdg-open")
+                .arg("https://mpv.io/installation/")
+                .spawn();
+            return false;
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        match AudioPlayer::install_mpv() {
+            Ok(_) => true,
+            Err(e) => {
+                rfd::MessageDialog::new()
+                    .set_title("mpv")
+                    .set_description(e)
+                    .set_buttons(rfd::MessageButtons::Ok)
+                    .show();
+                allow_skip
+            }
+        }
+    }
+
     fn ytdlp_stream_url(track: &TrackInfo, format: YtDlpFormat) -> Result<String, String> {
         let ytdlp = Self::resolve_yt_dlp()?;
         let target = if track.url.starts_with("http://") || track.url.starts_with("https://") {
@@ -1084,6 +1141,9 @@ impl LinkParserApp {
                 self.status = format!("❌ {}", err);
                 return;
             }
+        }
+        if !Self::offer_mpv_ui(true) {
+            return;
         }
         self.status = format!("🎧 Поток: {} — {}", track.artist, track.title);
         self.loading = true;
@@ -1242,8 +1302,16 @@ impl LinkParserApp {
                     }
                     if let Some(path) = play_path {
                         let _ = if play_video {
-                            self.player
-                                .play_url(path.to_str().unwrap_or(""), &play_title, "Видео", true)
+                            if Self::offer_mpv_ui(true) {
+                                self.player.play_url(
+                                    path.to_str().unwrap_or(""),
+                                    &play_title,
+                                    "Видео",
+                                    true,
+                                )
+                            } else {
+                                Ok(())
+                            }
                         } else {
                             self.player.play_file(&path, &play_title, false)
                         };

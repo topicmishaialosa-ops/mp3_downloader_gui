@@ -1,5 +1,7 @@
 #include "playercontroller.h"
 
+#include "mpvhelper.h"
+
 #include <QAudioOutput>
 #include <QDir>
 #include <QLabel>
@@ -51,8 +53,11 @@ void PlayerController::bindUi(QLabel *title, QLabel *subtitle, QSlider *seek, QW
 }
 
 bool PlayerController::hasMpv() const {
-    return !QStandardPaths::findExecutable(QStringLiteral("mpv")).isEmpty()
-           || !QStandardPaths::findExecutable(QStringLiteral("mpv.exe")).isEmpty();
+    return MpvHelper::isAvailable();
+}
+
+QString PlayerController::mpvExecutable() const {
+    return MpvHelper::resolveBinary();
 }
 
 QString PlayerController::mpvSocketPath() const {
@@ -90,10 +95,7 @@ void PlayerController::stopQtPlayer() {
 }
 
 void PlayerController::sendMpvCommand(const QStringList &args) const {
-    QString mpv = QStandardPaths::findExecutable(QStringLiteral("mpv"));
-    if (mpv.isEmpty()) {
-        mpv = QStandardPaths::findExecutable(QStringLiteral("mpv.exe"));
-    }
+    const QString mpv = mpvExecutable();
     if (mpv.isEmpty()) {
         return;
     }
@@ -104,10 +106,7 @@ void PlayerController::sendMpvCommand(const QStringList &args) const {
 }
 
 bool PlayerController::startMpv(const QString &url, const QString &title, bool isVideo) {
-    QString mpv = QStandardPaths::findExecutable(QStringLiteral("mpv"));
-    if (mpv.isEmpty()) {
-        mpv = QStandardPaths::findExecutable(QStringLiteral("mpv.exe"));
-    }
+    const QString mpv = mpvExecutable();
     if (mpv.isEmpty()) {
         return false;
     }

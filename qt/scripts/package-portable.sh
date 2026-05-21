@@ -101,6 +101,7 @@ MP3 Downloader GUI (Qt) — portable Linux
   sudo pacman -S qt6-base qt6-multimedia              # Arch
 
 YouTube: yt-dlp в PATH или автоустановка в ~/yt-dlp-util/bin/ при первом использовании.
+Стрим/видео: mpv в PATH или ~/mpv-util/ (Windows/macOS — скачивание из приложения).
 TXT
         ;;
     *)

@@ -44,6 +44,7 @@ private:
     void enqueueTracks(const QList<class QListWidgetItem *> &items, bool downloadOnly);
     void startStream(const Track &track);
     bool ensureYtDlp();
+    bool ensureMpv(bool allowSkip = true);
     DownloadSource currentSource() const;
     YtFormat currentYtFormat() const;
 

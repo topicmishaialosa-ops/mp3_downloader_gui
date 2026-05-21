@@ -28,7 +28,7 @@ Desktop-версия на **Qt6** (C++): MP3Party, DriveMusic, YouTube (yt-dlp).
 - CMake ≥ 3.16
 - C++17 компилятор
 - **yt-dlp** в PATH или автоустановка в `~/yt-dlp-util/bin/` при первом использовании YouTube
-- **mpv** в PATH (стриминг и видео; без него — только локальные файлы через Qt)
+- **mpv** в PATH или автоустановка в `~/mpv-util/` (стриминг, видео, перемотка; без mpv — Qt-плеер)
 
 На **Windows** папка загрузок по умолчанию — `%USERPROFILE%\mp3_downloader_gui\downloads` (через `QStandardPaths` + нативные разделители). Для mpv IPC используется именованный канал, не Unix-socket.
 

@@ -24,7 +24,9 @@
 - при теге `v*` (например `v1.4.7`) — автоматический **Release**;
 - вручную: Actions → Build → Run workflow → «Создать GitHub Release».
 
-Для **YouTube** нужен [yt-dlp](https://github.com/yt-dlp/yt-dlp). Во **всех** версиях приложения (Rust, Qt, Android), если зависимости нет, показывается предложение скачать/установить: desktop — бинарник в `~/yt-dlp-util/bin/` (Windows: `%USERPROFILE%\yt-dlp-util\bin\`), Android — встроенная библиотека при первом запуске YouTube. Для перемотки в Rust-версии удобен [mpv](https://mpv.io/).
+Для **YouTube** нужен [yt-dlp](https://github.com/yt-dlp/yt-dlp). Во **всех** версиях приложения (Rust, Qt, Android), если зависимости нет, показывается предложение скачать/установить: desktop — бинарник в `~/yt-dlp-util/bin/` (Windows: `%USERPROFILE%\yt-dlp-util\bin\`), Android — встроенная библиотека при первом запуске YouTube.
+
+Для **стриминга, видео и перемотки** в desktop (Rust, Qt) рекомендуется [mpv](https://mpv.io/). Если mpv нет в PATH, приложение предложит установку: Windows/macOS — portable в `~/mpv-util/` (нужен 7-Zip для распаковки), Linux — подсказка `pacman`/`apt` и ссылка на mpv.io. Без mpv воспроизведение возможно в ограниченном режиме (Rust — загрузка потока в файл, Qt — встроенный плеер).
 
 ## Компоненты
 

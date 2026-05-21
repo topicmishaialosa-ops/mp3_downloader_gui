@@ -24,6 +24,7 @@
 #include "drivemusicapi.h"
 #include "mp3partyapi.h"
 #include "paths.h"
+#include "mpvhelper.h"
 #include "ytdlphelper.h"
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
@@ -109,6 +110,9 @@ void MainWindow::setupUi() {
             return;
         }
         const auto &f = m_library[row];
+        if (f.isVideo && !ensureMpv(true)) {
+            return;
+        }
         m_player.playFile(f.path, f.displayName, f.isVideo);
     });
     libLay->addLayout(libTop);
@@ -176,6 +180,66 @@ DownloadSource MainWindow::currentSource() const {
 
 YtFormat MainWindow::currentYtFormat() const {
     return static_cast<YtFormat>(m_ytFormatCombo->currentData().toInt());
+}
+
+bool MainWindow::ensureMpv(bool allowSkip) {
+    if (MpvHelper::isAvailable()) {
+        return true;
+    }
+    QString msg;
+#if defined(Q_OS_LINUX)
+    msg = QStringLiteral(
+        "Для стриминга и перемотки рекомендуется mpv, но он не найден.\n\n"
+        "Установите через пакетный менеджер:\n"
+        "  sudo pacman -S mpv\n"
+        "  sudo apt install mpv\n\n"
+        "%1 без mpv (ограниченный плеер)?")
+            .arg(allowSkip ? QStringLiteral("Продолжить") : QStringLiteral("Отмена"));
+#else
+    msg = QStringLiteral(
+        "Для стриминга и перемотки рекомендуется mpv, но он не найден.\n\n"
+        "Скачать portable-сборку в\n%1?\n\n"
+        "%2")
+            .arg(MpvHelper::installDir(),
+                 allowSkip ? QStringLiteral("(«Нет» — встроенный Qt-плеер без перемотки)")
+                           : QString());
+#endif
+
+    const auto answer = QMessageBox::question(
+        this,
+        QStringLiteral("mpv"),
+        msg,
+        allowSkip ? (QMessageBox::Yes | QMessageBox::No | QMessageBox::Cancel)
+                  : (QMessageBox::Yes | QMessageBox::No),
+        QMessageBox::Yes);
+
+    if (answer == QMessageBox::Cancel) {
+        return false;
+    }
+    if (answer == QMessageBox::No) {
+        return allowSkip;
+    }
+
+#if defined(Q_OS_LINUX)
+    QDesktopServices::openUrl(QUrl(QStringLiteral("https://mpv.io/installation/")));
+    onLog(QStringLiteral("ℹ️ Установите mpv и повторите воспроизведение"));
+    return false;
+#else
+    m_progress->setVisible(true);
+    onLog(QStringLiteral("⏳ Скачивание mpv…"));
+    QString err;
+    const bool ok = MpvHelper::install(&err);
+    m_progress->setVisible(false);
+    if (!ok) {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("mpv"),
+            err.isEmpty() ? QStringLiteral("Не удалось установить mpv") : err);
+        return allowSkip;
+    }
+    onLog(QStringLiteral("✅ mpv установлен: %1").arg(MpvHelper::resolveBinary()));
+    return true;
+#endif
 }
 
 bool MainWindow::ensureYtDlp() {
@@ -331,6 +395,9 @@ void MainWindow::onStreamSelected() {
 
 void MainWindow::startStream(const Track &track) {
     if (currentSource() == DownloadSource::YtDlp && !ensureYtDlp()) {
+        return;
+    }
+    if (!ensureMpv(true)) {
         return;
     }
     m_progress->setVisible(true);

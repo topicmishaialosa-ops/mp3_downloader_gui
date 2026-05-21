@@ -25,6 +25,8 @@ qt_add_executable(mp3_downloader_gui_qt
     src/drivemusicapi.h
     src/ytdlphelper.cpp
     src/ytdlphelper.h
+    src/mpvhelper.cpp
+    src/mpvhelper.h
     src/downloadmanager.cpp
     src/downloadmanager.h
     src/playercontroller.cpp

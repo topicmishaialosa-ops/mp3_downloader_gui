@@ -1,10 +1,13 @@
+use std::fs;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use regex::Regex;
 use rodio::{Decoder, OutputStream, Sink, Source};
+use std::sync::LazyLock;
 
 #[derive(Clone, Debug, Default)]
 pub struct PlayerState {
@@ -142,10 +145,12 @@ impl AudioPlayer {
     }
 
     pub fn play_url(&mut self, url: &str, title: &str, subtitle: &str, is_video: bool) -> Result<(), String> {
-        if Self::has_mpv() {
-            return self.play_external(url, title, is_video).map(|_| {
-                self.state.subtitle = subtitle.to_string();
-            });
+        if let Some(mpv) = Self::resolve_mpv() {
+            return self
+                .play_external_with(url, title, is_video, &mpv)
+                .map(|_| {
+                    self.state.subtitle = subtitle.to_string();
+                });
         }
         // fallback: скачать во временный файл и rodio
         let tmp = std::env::temp_dir().join(format!(
@@ -179,6 +184,18 @@ impl AudioPlayer {
     }
 
     fn play_external(&mut self, target: &str, title: &str, is_video: bool) -> Result<(), String> {
+        let mpv = Self::resolve_mpv()
+            .ok_or_else(|| "mpv не найден".to_string())?;
+        self.play_external_with(target, title, is_video, &mpv)
+    }
+
+    fn play_external_with(
+        &mut self,
+        target: &str,
+        title: &str,
+        is_video: bool,
+        mpv: &Path,
+    ) -> Result<(), String> {
         self.stop();
         let mut args = vec![
             "--really-quiet".to_string(),
@@ -196,7 +213,7 @@ impl AudioPlayer {
         ));
         args.push(target.to_string());
 
-        let child = match Command::new("mpv")
+        let child = match Command::new(mpv)
             .args(&args)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
@@ -236,12 +253,79 @@ impl AudioPlayer {
         Ok(())
     }
 
-    fn has_mpv() -> bool {
-        Command::new("which")
-            .arg("mpv")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+    pub fn mpv_install_dir() -> PathBuf {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        #[cfg(windows)]
+        return home.join("mpv-util").join("windows");
+        #[cfg(target_os = "macos")]
+        return home.join("mpv-util").join("macos");
+        #[cfg(not(any(windows, target_os = "macos")))]
+        home.join("mpv-util").join("bin")
+    }
+
+    pub fn resolve_mpv() -> Option<PathBuf> {
+        #[cfg(windows)]
+        let bundled = Self::mpv_install_dir().join("mpv.exe");
+        #[cfg(not(windows))]
+        let bundled = Self::mpv_install_dir().join("mpv");
+        if bundled.exists() {
+            return Some(bundled);
+        }
+
+        #[cfg(windows)]
+        let which_cmd = "where";
+        #[cfg(not(windows))]
+        let which_cmd = "which";
+        if let Ok(out) = Command::new(which_cmd).arg("mpv").output() {
+            if out.status.success() {
+                let path = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !path.is_empty() {
+                    return Some(PathBuf::from(path));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn has_mpv() -> bool {
+        Self::resolve_mpv().is_some()
+    }
+
+    pub fn install_mpv() -> Result<PathBuf, String> {
+        #[cfg(target_os = "linux")]
+        {
+            return Err(
+                "На Linux установите mpv через пакетный менеджер:\n  sudo pacman -S mpv\n  sudo apt install mpv\nhttps://mpv.io/installation/"
+                    .into(),
+            );
+        }
+
+        #[cfg(all(target_os = "macos", not(target_arch = "aarch64")))]
+        {
+            return Err(
+                "Автоустановка mpv для Intel Mac недоступна. Установите: brew install mpv".into(),
+            );
+        }
+
+        #[cfg(any(windows, all(target_os = "macos", target_arch = "aarch64")))]
+        {
+            return install_mpv_portable();
+        }
+
+        #[cfg(not(any(
+            target_os = "linux",
+            windows,
+            all(target_os = "macos", target_arch = "aarch64")
+        )))]
+        Err("Автоустановка mpv не поддерживается на этой платформе".into())
     }
 
     fn mpv_socket_path() -> PathBuf {
@@ -249,7 +333,10 @@ impl AudioPlayer {
     }
 
     fn send_mpv(&self, args: &[&str]) {
-        let _ = Command::new("mpv")
+        let Some(mpv) = Self::resolve_mpv() else {
+            return;
+        };
+        let _ = Command::new(mpv)
             .arg(format!(
                 "--input-ipc-server={}",
                 Self::mpv_socket_path().display()
@@ -257,6 +344,169 @@ impl AudioPlayer {
             .args(args)
             .status();
     }
+}
+
+static RE_SHINCHIRO_ASSET: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r#""name":"([^"]+\.7z)"[^}]*"browser_download_url":"([^"]+)""#).unwrap()
+});
+
+#[cfg(any(windows, all(target_os = "macos", target_arch = "aarch64")))]
+fn install_mpv_portable() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    let prefix = "mpv-x86_64";
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    let prefix = "mpv-aarch64";
+
+    let url = shinchiro_mpv_asset_url(prefix)?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(180))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let bytes = client
+        .get(&url)
+        .send()
+        .map_err(|e| format!("Скачивание mpv: {e}"))?
+        .bytes()
+        .map_err(|e| e.to_string())?;
+
+    let tmp = std::env::temp_dir().join(format!(
+        "mp3party_mpv_{}.7z",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    ));
+    fs::write(&tmp, &bytes).map_err(|e| e.to_string())?;
+
+    let extract = std::env::temp_dir().join("mp3party_mpv_extract");
+    let _ = fs::remove_dir_all(&extract);
+    fs::create_dir_all(&extract).map_err(|e| e.to_string())?;
+    extract_mpv_7z(&tmp, &extract)?;
+
+    let found = find_mpv_in_tree(&extract).ok_or_else(|| "mpv не найден в архиве".to_string())?;
+    let src_dir = found.parent().ok_or_else(|| "Нет каталога mpv".to_string())?;
+    let dest = AudioPlayer::mpv_install_dir();
+    let _ = fs::remove_dir_all(&dest);
+    copy_dir_all(src_dir, &dest).map_err(|e| e.to_string())?;
+    let _ = fs::remove_file(&tmp);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = fs::metadata(&found) {
+            let mut perms = meta.permissions();
+            perms.set_mode(0o755);
+            let _ = fs::set_permissions(&found, perms);
+        }
+    }
+
+    AudioPlayer::resolve_mpv().ok_or_else(|| "mpv установлен, но не найден".to_string())
+}
+
+fn shinchiro_mpv_asset_url(prefix: &str) -> Result<String, String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(60))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let body = client
+        .get("https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .map_err(|e| e.to_string())?
+        .text()
+        .map_err(|e| e.to_string())?;
+
+    let mut fallback = None;
+    for caps in RE_SHINCHIRO_ASSET.captures_iter(&body) {
+        let name = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+        let url = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+        if !name.starts_with(prefix) {
+            continue;
+        }
+        if name.contains("v3") {
+            return Ok(url);
+        }
+        if fallback.is_none() {
+            fallback = Some(url);
+        }
+    }
+    fallback.ok_or_else(|| "Сборка mpv не найдена на GitHub".to_string())
+}
+
+fn extract_mpv_7z(archive: &Path, dest: &Path) -> Result<(), String> {
+    let seven_z = ["7z", "7za"]
+        .iter()
+        .find_map(|cmd| {
+            Command::new("which")
+                .arg(cmd)
+                .output()
+                .ok()
+                .filter(|o| o.status.success())
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        })
+        .or_else(|| {
+            #[cfg(windows)]
+            {
+                let p = PathBuf::from(r"C:\Program Files\7-Zip\7z.exe");
+                if p.exists() {
+                    return Some(p.to_string_lossy().into_owned());
+                }
+            }
+            None
+        })
+        .ok_or_else(|| {
+            "Нужен 7-Zip (7z) для распаковки mpv. Установите 7-Zip или mpv в PATH.".to_string()
+        })?;
+
+    let status = Command::new(&seven_z)
+        .args([
+            "x",
+            &archive.to_string_lossy(),
+            &format!("-o{}", dest.display()),
+            "-y",
+        ])
+        .status()
+        .map_err(|e| e.to_string())?;
+    if !status.success() {
+        return Err("Распаковка mpv (7z) не удалась".into());
+    }
+    Ok(())
+}
+
+fn find_mpv_in_tree(root: &Path) -> Option<PathBuf> {
+    #[cfg(windows)]
+    const NAME: &str = "mpv.exe";
+    #[cfg(not(windows))]
+    const NAME: &str = "mpv";
+
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = fs::read_dir(&dir).ok()?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.file_name().and_then(|n| n.to_str()) == Some(NAME) {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let to = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &to)?;
+        } else {
+            fs::copy(entry.path(), to)?;
+        }
+    }
+    Ok(())
 }
 
 pub fn open_folder_in_file_manager(path: &Path) {

@@ -38,6 +38,7 @@ private:
     void stopQtPlayer();
     void stopMpv();
     bool hasMpv() const;
+    QString mpvExecutable() const;
     QString mpvSocketPath() const;
     bool startMpv(const QString &url, const QString &title, bool isVideo);
     void sendMpvCommand(const QStringList &args) const;
