@@ -24,5 +24,9 @@
     <string name="ytdlp_init">Инициализация yt-dlp…</string>
     <string name="ytdlp_ready">yt-dlp готов</string>
     <string name="ytdlp_error">yt-dlp: %s</string>
+    <string name="ytdlp_dialog_title">yt-dlp</string>
+    <string name="ytdlp_dialog_message">Для YouTube нужен yt-dlp. Скачать и установить в приложение? (первый раз ~1–2 мин, нужен интернет)</string>
+    <string name="ytdlp_download">Скачать</string>
+    <string name="ytdlp_not_installed">yt-dlp не установлен</string>
     <string name="folder_copy_hint">Путь скопирован в буфер:\n%s</string>
 </resources>

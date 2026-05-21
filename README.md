@@ -24,7 +24,7 @@
 - при теге `v*` (например `v1.4.7`) — автоматический **Release**;
 - вручную: Actions → Build → Run workflow → «Создать GitHub Release».
 
-Для **YouTube** нужен [yt-dlp](https://github.com/yt-dlp/yt-dlp). В desktop-версиях (Rust и Qt), если его нет в PATH, приложение предложит скачать бинарник в `~/yt-dlp-util/bin/` (Windows: `%USERPROFILE%\yt-dlp-util\bin\`). Для перемотки в Rust-версии удобен [mpv](https://mpv.io/).
+Для **YouTube** нужен [yt-dlp](https://github.com/yt-dlp/yt-dlp). Во **всех** версиях приложения (Rust, Qt, Android), если зависимости нет, показывается предложение скачать/установить: desktop — бинарник в `~/yt-dlp-util/bin/` (Windows: `%USERPROFILE%\yt-dlp-util\bin\`), Android — встроенная библиотека при первом запуске YouTube. Для перемотки в Rust-версии удобен [mpv](https://mpv.io/).
 
 ## Компоненты
 

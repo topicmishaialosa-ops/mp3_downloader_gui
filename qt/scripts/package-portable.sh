@@ -100,7 +100,7 @@ MP3 Downloader GUI (Qt) — portable Linux
   sudo apt install qt6-base-dev qt6-multimedia-dev   # Debian/Ubuntu
   sudo pacman -S qt6-base qt6-multimedia              # Arch
 
-Нужен yt-dlp в PATH для YouTube.
+YouTube: yt-dlp в PATH или автоустановка в ~/yt-dlp-util/bin/ при первом использовании.
 TXT
         ;;
     *)

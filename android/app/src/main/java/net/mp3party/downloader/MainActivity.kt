@@ -10,6 +10,7 @@ import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
 import androidx.fragment.app.commit
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.slider.Slider
 import kotlinx.coroutines.Dispatchers
@@ -17,7 +18,9 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import kotlin.coroutines.resume
 import net.mp3party.downloader.databinding.ActivityMainBinding
 import net.mp3party.downloader.databinding.PlayerBarBinding
 import java.io.File
@@ -234,6 +237,37 @@ class MainActivity : AppCompatActivity() {
         if (text.isNotEmpty()) binding.loadingText.text = text
     }
 
+    /** Запросить загрузку yt-dlp (Android-библиотека), если ещё не готов. */
+    suspend fun ensureYtDlp(): Boolean {
+        if (YtDlpHelper.isReady) return true
+        return suspendCancellableCoroutine { cont ->
+            MaterialAlertDialogBuilder(this)
+                .setTitle(R.string.ytdlp_dialog_title)
+                .setMessage(R.string.ytdlp_dialog_message)
+                .setPositiveButton(R.string.ytdlp_download) { _, _ ->
+                    lifecycleScope.launch {
+                        try {
+                            withContext(Dispatchers.IO) {
+                                YtDlpHelper.init(applicationContext)
+                            }
+                            searchFragment?.refreshYtdlpStatus()
+                            cont.resume(true)
+                        } catch (e: Exception) {
+                            Snackbar.make(
+                                binding.root,
+                                e.message ?: getString(R.string.ytdlp_not_installed),
+                                Snackbar.LENGTH_LONG,
+                            ).show()
+                            cont.resume(false)
+                        }
+                    }
+                }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> cont.resume(false) }
+                .setOnCancelListener { cont.resume(false) }
+                .show()
+        }
+    }
+
     private fun openFullscreenPlayer() {
         if (!PlaybackManager.isVideo) return
         val intent = Intent(this, PlayerActivity::class.java).apply {
@@ -265,10 +299,10 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
+                if (!ensureYtDlp()) {
+                    return@launch
+                }
                 val url = withContext(Dispatchers.IO) {
-                    if (!YtDlpHelper.isReady) {
-                        YtDlpHelper.init(applicationContext)
-                    }
                     YtDlpHelper.getStreamUrl(applicationContext, track, format)
                 }
                 val title = listOf(track.artist, track.title)
@@ -306,6 +340,9 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
+                if (track.source == DownloadSource.YouTube && !ensureYtDlp()) {
+                    return@launch
+                }
                 val file = DownloadHelper.download(
                     this@MainActivity,
                     track,

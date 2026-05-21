@@ -11,8 +11,8 @@ android {
         applicationId = "net.mp3party.downloader"
         minSdk = 24
         targetSdk = 34
-        versionCode = 10
-        versionName = "1.4.7"
+        versionCode = 12
+        versionName = "1.4.12"
         ndk {
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }

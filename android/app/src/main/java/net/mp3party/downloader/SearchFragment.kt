@@ -120,15 +120,19 @@ class SearchFragment : Fragment() {
 
         lifecycleScope.launch {
             try {
+                if (source == DownloadSource.YouTube) {
+                    val activity = activity as? MainActivity
+                    if (activity == null || !activity.ensureYtDlp()) {
+                        binding.statusText.text = "❌ ${getString(R.string.ytdlp_not_installed)}"
+                        return@launch
+                    }
+                }
                 val results = withContext(Dispatchers.IO) {
                     when (source) {
                         DownloadSource.MP3Party -> Mp3PartyApi.search(query)
                         DownloadSource.DriveMusic -> DriveMusicApi.search(query)
                         DownloadSource.YouTube -> {
                             val app = requireContext().applicationContext
-                            if (!YtDlpHelper.isReady) {
-                                YtDlpHelper.init(app)
-                            }
                             YtDlpHelper.search(app, query)
                         }
                     }
@@ -173,6 +177,11 @@ class SearchFragment : Fragment() {
     fun refreshPlaybackButtons() {
         if (_binding == null || !::adapter.isInitialized) return
         adapter.notifyDataSetChanged()
+    }
+
+    fun refreshYtdlpStatus() {
+        if (_binding == null) return
+        updateYtdlpStatus()
     }
 
     override fun onDestroyView() {

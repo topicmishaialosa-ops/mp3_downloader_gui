@@ -685,7 +685,7 @@ impl LinkParserApp {
 
     /// Поиск через YouTube (yt-dlp ytsearch)
     fn search_tracks_ytdlp(query: &str) -> Result<Vec<TrackInfo>, String> {
-        let ytdlp = Self::ensure_yt_dlp()?;
+        let ytdlp = Self::resolve_yt_dlp()?;
         let target = format!("ytsearch20:{}", query);
 
         let mut cmd = Command::new(&ytdlp);
@@ -978,11 +978,8 @@ impl LinkParserApp {
         Ok(path)
     }
 
-    fn ensure_yt_dlp() -> Result<PathBuf, String> {
-        if let Ok(p) = Self::resolve_yt_dlp() {
-            return Ok(p);
-        }
-
+    /// Диалог и установка yt-dlp (только с UI-потока, до фоновых задач).
+    fn prompt_and_install_yt_dlp() -> Result<PathBuf, String> {
         let install_to = Self::ytdlp_install_path();
         let msg = format!(
             "Для YouTube нужен yt-dlp, но он не найден.\n\n\
@@ -1007,8 +1004,13 @@ impl LinkParserApp {
         })
     }
 
+    fn require_yt_dlp_ui() -> Result<PathBuf, String> {
+        Self::resolve_yt_dlp()
+            .or_else(|_| Self::prompt_and_install_yt_dlp())
+    }
+
     fn ytdlp_stream_url(track: &TrackInfo, format: YtDlpFormat) -> Result<String, String> {
-        let ytdlp = Self::ensure_yt_dlp()?;
+        let ytdlp = Self::resolve_yt_dlp()?;
         let target = if track.url.starts_with("http://") || track.url.starts_with("https://") {
             track.url.clone()
         } else {
@@ -1077,6 +1079,12 @@ impl LinkParserApp {
         let track = self.tracks[idx].clone();
         let source = self.download_source;
         let fmt = self.ytdlp_format;
+        if source == DownloadSource::YtDlp {
+            if let Err(err) = Self::require_yt_dlp_ui() {
+                self.status = format!("❌ {}", err);
+                return;
+            }
+        }
         self.status = format!("🎧 Поток: {} — {}", track.artist, track.title);
         self.loading = true;
 
@@ -2113,7 +2121,7 @@ impl LinkParserApp {
                 ),
             );
 
-            let ytdlp = match Self::ensure_yt_dlp() {
+            let ytdlp = match Self::resolve_yt_dlp() {
                 Ok(p) => p,
                 Err(e) => {
                     fail(&status, e);
@@ -2357,6 +2365,23 @@ impl LinkParserApp {
             return;
         }
 
+        let source = self.download_source;
+        if source == DownloadSource::YtDlp {
+            if let Err(err) = Self::require_yt_dlp_ui() {
+                self.status = format!("❌ {}", err);
+                self.push_log_line(format!(
+                    "[{}] ❌ yt-dlp: {}",
+                    Self::log_timestamp(),
+                    err
+                ));
+                return;
+            }
+            self.push_log_line(format!(
+                "[{}] ✅ yt-dlp готов",
+                Self::log_timestamp()
+            ));
+        }
+
         self.tracks.clear();
         self.result_filter.clear();
         self.output_mode = OutputMode::Search;
@@ -2368,7 +2393,6 @@ impl LinkParserApp {
         self.error_count = 0;
         self.last_error = None;
         self.begin_loading();
-        let source = self.download_source;
         self.status = format!(
             "⏳ Поиск [{}] «{}»...",
             source.label(),
@@ -2405,6 +2429,12 @@ impl LinkParserApp {
     fn start_download(&mut self, track_idx: usize) {
         let source = self.download_source;
         let ytdlp_format = self.ytdlp_format;
+        if source == DownloadSource::YtDlp {
+            if let Err(err) = Self::require_yt_dlp_ui() {
+                self.status = format!("❌ {}", err);
+                return;
+            }
+        }
         if let Some(track) = self.tracks.get(track_idx) {
             for task in &self.download_tasks {
                 let s = task.status.lock().unwrap();

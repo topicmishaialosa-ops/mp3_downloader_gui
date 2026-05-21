@@ -1,5 +1,6 @@
 /target/
 **/build/
+qt/build-fresh/
 **/.gradle/
 **/local.properties
 **/.idea/
