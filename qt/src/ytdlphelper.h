@@ -8,6 +8,11 @@
 
 class YtDlpHelper {
 public:
+    static QString installDir();
+    static QString installPath();
+    static QString downloadUrl();
+    static bool isAvailable();
+    static bool install(QString *error = nullptr);
     static QString resolveBinary(QString *error = nullptr);
     static QVector<Track> search(const QString &query, QString *error = nullptr);
     static QString download(const Track &track,

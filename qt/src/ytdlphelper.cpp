@@ -1,10 +1,14 @@
 #include "ytdlphelper.h"
 
+#include "httpclient.h"
+
 #include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QProcess>
 #include <QRegularExpression>
 #include <QStandardPaths>
+#include <QUrl>
 #include <QtGlobal>
 
 static QPair<QString, QString> splitTitle(const QString &full, const QString &channel) {
@@ -18,8 +22,71 @@ static QPair<QString, QString> splitTitle(const QString &full, const QString &ch
     return {QStringLiteral("YouTube"), full.trimmed()};
 }
 
+QString YtDlpHelper::installDir() {
+    return QDir(QDir::homePath()).filePath(QStringLiteral("yt-dlp-util/bin"));
+}
+
+QString YtDlpHelper::installPath() {
+#if defined(Q_OS_WIN)
+    return QDir(installDir()).filePath(QStringLiteral("yt-dlp.exe"));
+#elif defined(Q_OS_MACOS)
+    return QDir(installDir()).filePath(QStringLiteral("yt-dlp_macos"));
+#else
+    return QDir(installDir()).filePath(QStringLiteral("yt-dlp"));
+#endif
+}
+
+QString YtDlpHelper::downloadUrl() {
+#if defined(Q_OS_WIN)
+    return QStringLiteral("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe");
+#elif defined(Q_OS_MACOS)
+    return QStringLiteral("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos");
+#else
+    return QStringLiteral("https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp");
+#endif
+}
+
+bool YtDlpHelper::isAvailable() {
+    return !resolveBinary(nullptr).isEmpty();
+}
+
+bool YtDlpHelper::install(QString *error) {
+    const QString dest = installPath();
+    QDir().mkpath(installDir());
+
+    const auto resp = HttpClient::downloadToFile(QUrl(downloadUrl()), dest, {});
+    if (!resp.ok()) {
+        if (error) {
+            *error = resp.error.isEmpty()
+                         ? QStringLiteral("Скачивание yt-dlp: HTTP %1").arg(resp.status)
+                         : resp.error;
+        }
+        return false;
+    }
+
+#if !defined(Q_OS_WIN)
+    QFile f(dest);
+    if (!f.setPermissions(QFile::ExeUser | QFile::ReadUser | QFile::WriteUser | QFile::ReadGroup
+                          | QFile::ExeGroup | QFile::ReadOther | QFile::ExeOther)) {
+        if (error) {
+            *error = QStringLiteral("Не удалось сделать yt-dlp исполняемым");
+        }
+        return false;
+    }
+#endif
+
+    if (!QFileInfo::exists(dest)) {
+        if (error) {
+            *error = QStringLiteral("Файл yt-dlp не создан после загрузки");
+        }
+        return false;
+    }
+    return true;
+}
+
 QString YtDlpHelper::resolveBinary(QString *error) {
     QStringList candidates;
+    candidates << installPath();
     const QString home = QDir::homePath();
 #if defined(Q_OS_WIN)
     candidates << QDir(home).filePath(
@@ -35,15 +102,9 @@ QString YtDlpHelper::resolveBinary(QString *error) {
         }
     }
     if (error) {
-#if defined(Q_OS_WIN)
         *error = QStringLiteral(
-            "yt-dlp не найден. Установите yt-dlp в PATH "
-            "или в %USERPROFILE%\\yt-dlp-util\\.yt-dlp-venv\\Scripts\\");
-#else
-        *error = QStringLiteral(
-            "yt-dlp не найден. Установите yt-dlp в PATH "
-            "или в ~/yt-dlp-util/.yt-dlp-venv/bin/");
-#endif
+            "yt-dlp не найден. Установите в PATH или скачайте через приложение в %1")
+                     .arg(installPath());
     }
     return {};
 }

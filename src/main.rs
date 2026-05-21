@@ -685,7 +685,7 @@ impl LinkParserApp {
 
     /// Поиск через YouTube (yt-dlp ytsearch)
     fn search_tracks_ytdlp(query: &str) -> Result<Vec<TrackInfo>, String> {
-        let ytdlp = Self::resolve_yt_dlp()?;
+        let ytdlp = Self::ensure_yt_dlp()?;
         let target = format!("ytsearch20:{}", query);
 
         let mut cmd = Command::new(&ytdlp);
@@ -875,32 +875,140 @@ impl LinkParserApp {
         });
     }
 
+    fn ytdlp_install_path() -> PathBuf {
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("."));
+        #[cfg(windows)]
+        return home.join("yt-dlp-util").join("bin").join("yt-dlp.exe");
+        #[cfg(target_os = "macos")]
+        return home.join("yt-dlp-util").join("bin").join("yt-dlp_macos");
+        #[cfg(not(any(windows, target_os = "macos")))]
+        home.join("yt-dlp-util").join("bin").join("yt-dlp")
+    }
+
+    fn ytdlp_download_url() -> &'static str {
+        #[cfg(windows)]
+        return "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+        #[cfg(target_os = "macos")]
+        return "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos";
+        #[cfg(not(any(windows, target_os = "macos")))]
+        "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp"
+    }
+
     fn resolve_yt_dlp() -> Result<PathBuf, String> {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let candidates = [
-            format!("{}/yt-dlp-util/.yt-dlp-venv/bin/yt-dlp", home),
-            "yt-dlp".to_string(),
-        ];
-        for c in &candidates {
-            if c.contains('/') {
-                let p = Path::new(c);
-                if p.exists() {
-                    return Ok(p.to_path_buf());
-                }
-            } else if let Ok(out) = Command::new("which").arg(c).output() {
-                if out.status.success() {
-                    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                    if !path.is_empty() {
-                        return Ok(PathBuf::from(path));
-                    }
+        let home = std::env::var_os("HOME")
+            .or_else(|| std::env::var_os("USERPROFILE"))
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
+        let mut file_candidates = vec![Self::ytdlp_install_path()];
+        if !home.is_empty() {
+            #[cfg(windows)]
+            file_candidates.push(PathBuf::from(format!(
+                "{home}/yt-dlp-util/.yt-dlp-venv/Scripts/yt-dlp.exe"
+            )));
+            #[cfg(not(windows))]
+            file_candidates.push(PathBuf::from(format!(
+                "{home}/yt-dlp-util/.yt-dlp-venv/bin/yt-dlp"
+            )));
+        }
+        for p in file_candidates {
+            if p.exists() {
+                return Ok(p);
+            }
+        }
+
+        #[cfg(windows)]
+        let which_cmd = "where";
+        #[cfg(not(windows))]
+        let which_cmd = "which";
+        if let Ok(out) = Command::new(which_cmd).arg("yt-dlp").output() {
+            if out.status.success() {
+                let path = String::from_utf8_lossy(&out.stdout)
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .to_string();
+                if !path.is_empty() {
+                    return Ok(PathBuf::from(path));
                 }
             }
         }
-        Err("yt-dlp не найден. Установите yt-dlp в PATH или venv в ~/yt-dlp-util.".into())
+
+        Err(format!(
+            "yt-dlp не найден. Установите в PATH или скачайте в {}",
+            Self::ytdlp_install_path().display()
+        ))
+    }
+
+    fn install_yt_dlp() -> Result<PathBuf, String> {
+        let path = Self::ytdlp_install_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+
+        let client = reqwest::blocking::Client::builder()
+            .user_agent(BROWSER_USER_AGENT)
+            .timeout(Duration::from_secs(120))
+            .build()
+            .map_err(|e| e.to_string())?;
+        let resp = client
+            .get(Self::ytdlp_download_url())
+            .send()
+            .map_err(|e| format!("Скачивание yt-dlp: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(format!("Скачивание yt-dlp: HTTP {}", resp.status()));
+        }
+        let bytes = resp.bytes().map_err(|e| e.to_string())?;
+        std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&path)
+                .map_err(|e| e.to_string())?
+                .permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&path, perms).map_err(|e| e.to_string())?;
+        }
+
+        Ok(path)
+    }
+
+    fn ensure_yt_dlp() -> Result<PathBuf, String> {
+        if let Ok(p) = Self::resolve_yt_dlp() {
+            return Ok(p);
+        }
+
+        let install_to = Self::ytdlp_install_path();
+        let msg = format!(
+            "Для YouTube нужен yt-dlp, но он не найден.\n\n\
+             Скачать последнюю версию с GitHub в\n{}?",
+            install_to.display()
+        );
+        let yes = rfd::MessageDialog::new()
+            .set_title("yt-dlp")
+            .set_description(msg)
+            .set_buttons(rfd::MessageButtons::YesNo)
+            .show();
+        if yes != rfd::MessageDialogResult::Yes {
+            return Err("yt-dlp не установлен — YouTube недоступен.".into());
+        }
+
+        let path = Self::install_yt_dlp()?;
+        Self::resolve_yt_dlp().map_err(|_| {
+            format!(
+                "yt-dlp скачан в {}, но не удалось запустить",
+                path.display()
+            )
+        })
     }
 
     fn ytdlp_stream_url(track: &TrackInfo, format: YtDlpFormat) -> Result<String, String> {
-        let ytdlp = Self::resolve_yt_dlp()?;
+        let ytdlp = Self::ensure_yt_dlp()?;
         let target = if track.url.starts_with("http://") || track.url.starts_with("https://") {
             track.url.clone()
         } else {
@@ -2005,7 +2113,7 @@ impl LinkParserApp {
                 ),
             );
 
-            let ytdlp = match Self::resolve_yt_dlp() {
+            let ytdlp = match Self::ensure_yt_dlp() {
                 Ok(p) => p,
                 Err(e) => {
                     fail(&status, e);

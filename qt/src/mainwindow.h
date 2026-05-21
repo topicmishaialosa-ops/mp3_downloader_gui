@@ -43,6 +43,7 @@ private:
     void refreshLibrary();
     void enqueueTracks(const QList<class QListWidgetItem *> &items, bool downloadOnly);
     void startStream(const Track &track);
+    bool ensureYtDlp();
     DownloadSource currentSource() const;
     YtFormat currentYtFormat() const;
 

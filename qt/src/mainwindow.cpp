@@ -178,10 +178,49 @@ YtFormat MainWindow::currentYtFormat() const {
     return static_cast<YtFormat>(m_ytFormatCombo->currentData().toInt());
 }
 
+bool MainWindow::ensureYtDlp() {
+    if (YtDlpHelper::isAvailable()) {
+        return true;
+    }
+    const auto answer = QMessageBox::question(
+        this,
+        QStringLiteral("yt-dlp"),
+        QStringLiteral(
+            "Для YouTube нужен yt-dlp, но он не найден.\n\n"
+            "Скачать последнюю версию с GitHub в\n%1?")
+            .arg(YtDlpHelper::installPath()),
+        QMessageBox::Yes | QMessageBox::No,
+        QMessageBox::Yes);
+    if (answer != QMessageBox::Yes) {
+        return false;
+    }
+    m_progress->setVisible(true);
+    m_searchBtn->setEnabled(false);
+    onLog(QStringLiteral("⏳ Скачивание yt-dlp…"));
+
+    QString err;
+    const bool ok = YtDlpHelper::install(&err);
+    m_progress->setVisible(false);
+    m_searchBtn->setEnabled(true);
+
+    if (!ok) {
+        QMessageBox::warning(
+            this,
+            QStringLiteral("yt-dlp"),
+            err.isEmpty() ? QStringLiteral("Не удалось скачать yt-dlp") : err);
+        return false;
+    }
+    onLog(QStringLiteral("✅ yt-dlp установлен: %1").arg(YtDlpHelper::installPath()));
+    return true;
+}
+
 void MainWindow::onSearch() {
     const QString query = m_queryEdit->text().trimmed();
     if (query.isEmpty()) {
         QMessageBox::warning(this, QString(), QStringLiteral("Введите запрос"));
+        return;
+    }
+    if (currentSource() == DownloadSource::YtDlp && !ensureYtDlp()) {
         return;
     }
     m_searchBtn->setEnabled(false);
@@ -244,6 +283,9 @@ void MainWindow::onOpenFolder() {
 }
 
 void MainWindow::enqueueTracks(const QList<QListWidgetItem *> &items, bool downloadOnly) {
+    if (currentSource() == DownloadSource::YtDlp && !ensureYtDlp()) {
+        return;
+    }
     m_downloads.setDownloadFolder(m_folderEdit->text());
     const auto src = currentSource();
     const auto fmt = currentYtFormat();
@@ -288,6 +330,9 @@ void MainWindow::onStreamSelected() {
 }
 
 void MainWindow::startStream(const Track &track) {
+    if (currentSource() == DownloadSource::YtDlp && !ensureYtDlp()) {
+        return;
+    }
     m_progress->setVisible(true);
     const auto src = currentSource();
     const auto fmt = currentYtFormat();
