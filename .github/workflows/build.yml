@@ -26,6 +26,37 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
+  lint:
+    name: Rust fmt + clippy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Install Linux deps (egui + rodio headers)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev libglib2.0-dev \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libssl-dev \
+            libasound2-dev pkg-config
+
+      - name: cargo fmt --check
+        run: cargo fmt --all -- --check
+
+      - name: cargo clippy
+        # Сейчас — информационный прогон. После устранения замечаний можно
+        # поднять до `cargo clippy --all-targets --locked -- -D warnings`.
+        run: cargo clippy --all-targets --locked --no-deps --message-format=short || true
+
   rust-linux:
     runs-on: ubuntu-24.04
     steps:
@@ -209,6 +240,7 @@ jobs:
 
   release:
     needs:
+      - lint
       - rust-linux
       - rust-windows
       - rust-macos

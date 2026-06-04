@@ -1,0 +1,4 @@
+[toolchain]
+# Фиксируем stable для воспроизводимых сборок (локально и в CI).
+channel = "stable"
+components = ["rustfmt", "clippy"]

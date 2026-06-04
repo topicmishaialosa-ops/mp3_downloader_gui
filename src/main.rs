@@ -12,9 +12,9 @@ use scraper::{Html, Selector};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::LazyLock;
-use std::sync::mpsc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::LazyLock;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -23,15 +23,13 @@ use std::time::{Duration, Instant};
 //  Статические Regex (компилируются один раз)
 // ═══════════════════════════════════════════
 
-static RE_ID_EXTRACT: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?:/download/|/music/)(\d+)|(?:^|/)(\d+)/?$").unwrap()
-});
+static RE_ID_EXTRACT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:/download/|/music/)(\d+)|(?:^|/)(\d+)/?$").unwrap());
 static RE_DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+$").unwrap());
 static RE_YTDLP_PERCENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d{1,3})(?:\.\d+)?%").unwrap());
-static RE_DRIVEMUSIC_MP3: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r#"https://[a-z0-9.-]*drivemusic\.me/dl/[^"\s<>]+\.mp3"#).unwrap()
-});
+static RE_DRIVEMUSIC_MP3: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"https://[a-z0-9.-]*drivemusic\.me/dl/[^"\s<>]+\.mp3"#).unwrap());
 static RE_DRIVEMUSIC_SEARCH: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
         r#"(?s)href="(/[a-z0-9_]+/(\d+)-[^"]+\.html)"[^>]*class="popular-play-author"[^>]*>([^<]*)</a>.*?popular-play-composition.*?>(?:<a[^>]*>)?([^<]*)"#,
@@ -54,9 +52,7 @@ fn default_downloads_folder() -> PathBuf {
     let home = std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     home.join("mp3_downloader_gui").join("downloads")
 }
 
@@ -75,7 +71,11 @@ struct TrackInfo {
 #[derive(Clone, Debug)]
 enum DownloadStatus {
     Pending,
-    Downloading { progress: f32, bytes: u64, total: u64 },
+    Downloading {
+        progress: f32,
+        bytes: u64,
+        total: u64,
+    },
     Completed(String),
     Failed(String),
     Cancelled,
@@ -471,7 +471,8 @@ impl LinkParserApp {
     fn extract_id(url: &str) -> Option<String> {
         if let Some(caps) = RE_ID_EXTRACT.captures(url) {
             // В объединённой регулярке: группа 1 = /download/или/music/ID, группа 2 = ID в конце
-            return caps.get(1)
+            return caps
+                .get(1)
                 .or_else(|| caps.get(2))
                 .map(|m| m.as_str().to_string());
         }
@@ -545,13 +546,18 @@ impl LinkParserApp {
                     .replace("mp3party.net", "")
                     .trim()
                     .to_string();
-                let parts: Vec<&str> = clean.split(|c| c == '-' || c == '—' || c == '–')
+                let parts: Vec<&str> = clean
+                    .split(|c| c == '-' || c == '—' || c == '–')
                     .map(|s| s.trim())
                     .filter(|s| !s.is_empty())
                     .collect();
                 if parts.len() >= 2 {
-                    if artist.is_empty() { artist = parts[0].to_string(); }
-                    if title.is_empty() { title = parts[1..].join(" - "); }
+                    if artist.is_empty() {
+                        artist = parts[0].to_string();
+                    }
+                    if title.is_empty() {
+                        title = parts[1..].join(" - ");
+                    }
                 } else if artist.is_empty() && title.is_empty() {
                     title = clean;
                 }
@@ -700,10 +706,8 @@ impl LinkParserApp {
             &target,
         ]);
 
-        let output = Self::run_command_with_timeout(
-            cmd,
-            Duration::from_secs(YTDLP_SEARCH_TIMEOUT_SECS),
-        )?;
+        let output =
+            Self::run_command_with_timeout(cmd, Duration::from_secs(YTDLP_SEARCH_TIMEOUT_SECS))?;
 
         if !output.status.success() && output.stdout.is_empty() {
             let err = String::from_utf8_lossy(&output.stderr);
@@ -776,8 +780,7 @@ impl LinkParserApp {
                 if q.is_empty() {
                     return true;
                 }
-                t.title.to_lowercase().contains(&q)
-                    || t.artist.to_lowercase().contains(&q)
+                t.title.to_lowercase().contains(&q) || t.artist.to_lowercase().contains(&q)
             })
             .map(|(i, _)| i)
             .collect()
@@ -810,9 +813,8 @@ impl LinkParserApp {
             return;
         }
         self.error_count += 1;
-        self.last_error = Some(
-            "Слишком долгое ожидание — операция прервана. Проверьте интернет.".into(),
-        );
+        self.last_error =
+            Some("Слишком долгое ожидание — операция прервана. Проверьте интернет.".into());
         self.processed = self.total_urls;
         self.finish_loading();
     }
@@ -823,10 +825,7 @@ impl LinkParserApp {
         self.rx = None;
 
         if self.tracks.is_empty() && self.error_count > 0 {
-            let msg = format!(
-                "❌ {}",
-                self.last_error.as_deref().unwrap_or("Ошибка")
-            );
+            let msg = format!("❌ {}", self.last_error.as_deref().unwrap_or("Ошибка"));
             self.push_log_line(format!("[{}] {}", Self::log_timestamp(), msg));
             self.status = msg;
             return;
@@ -1005,8 +1004,7 @@ impl LinkParserApp {
     }
 
     fn require_yt_dlp_ui() -> Result<PathBuf, String> {
-        Self::resolve_yt_dlp()
-            .or_else(|_| Self::prompt_and_install_yt_dlp())
+        Self::resolve_yt_dlp().or_else(|_| Self::prompt_and_install_yt_dlp())
     }
 
     /// Предложить установить mpv перед стримом/видео. `true` — можно воспроизводить.
@@ -1071,11 +1069,7 @@ impl LinkParserApp {
         let target = if track.url.starts_with("http://") || track.url.starts_with("https://") {
             track.url.clone()
         } else {
-            format!(
-                "ytsearch1:{} - {}",
-                track.artist.trim(),
-                track.title.trim()
-            )
+            format!("ytsearch1:{} - {}", track.artist.trim(), track.title.trim())
         };
         let format_arg = match format {
             YtDlpFormat::Mp3 => "bestaudio[ext=m4a]/bestaudio/best",
@@ -1263,10 +1257,7 @@ impl LinkParserApp {
             ui.add_space(6.0);
 
             if self.library_files.is_empty() {
-                ui.label(
-                    egui::RichText::new("Скачанных файлов пока нет")
-                        .color(theme.text_muted),
-                );
+                ui.label(egui::RichText::new("Скачанных файлов пока нет").color(theme.text_muted));
                 return;
             }
 
@@ -1488,9 +1479,7 @@ impl LinkParserApp {
         }
         #[cfg(target_os = "windows")]
         {
-            let _ = Command::new("cmd")
-                .args(["/C", "start", "", url])
-                .spawn();
+            let _ = Command::new("cmd").args(["/C", "start", "", url]).spawn();
         }
     }
 
@@ -1514,10 +1503,7 @@ impl LinkParserApp {
             }
         }
 
-        push_unique(
-            &mut candidates,
-            Self::mp3party_download_url(&track.id),
-        );
+        push_unique(&mut candidates, Self::mp3party_download_url(&track.id));
 
         if let Ok(panel_sel) = Selector::parse("div.track__user-panel") {
             for panel in document.select(&panel_sel) {
@@ -1532,10 +1518,7 @@ impl LinkParserApp {
         if track.url.starts_with("http") {
             push_unique(&mut candidates, track.url.clone());
         }
-        push_unique(
-            &mut candidates,
-            Self::mp3party_stream_url(&track.id),
-        );
+        push_unique(&mut candidates, Self::mp3party_stream_url(&track.id));
 
         candidates
     }
@@ -1652,18 +1635,11 @@ impl LinkParserApp {
 
             Self::log_send(
                 &log_tx,
-                format!(
-                    "📥 MP3Party: {} — {}",
-                    track.artist, track.title
-                ),
+                format!("📥 MP3Party: {} — {}", track.artist, track.title),
             );
 
-            let filename = format!(
-                "{} - {}.mp3",
-                track.artist.trim(),
-                track.title.trim()
-            )
-            .replace(|c: char| "/\\:*?\"<>|".contains(c), "_");
+            let filename = format!("{} - {}.mp3", track.artist.trim(), track.title.trim())
+                .replace(|c: char| "/\\:*?\"<>|".contains(c), "_");
 
             let filepath = folder.join(&filename);
             let track_page = format!("https://mp3party.net/music/{}", track.id);
@@ -1704,10 +1680,7 @@ impl LinkParserApp {
                     }
                 },
                 Ok(r) => {
-                    fail(
-                        &status,
-                        format!("Страница трека: HTTP {}", r.status()),
-                    );
+                    fail(&status, format!("Страница трека: HTTP {}", r.status()));
                     return;
                 }
                 Err(e) => {
@@ -1725,13 +1698,9 @@ impl LinkParserApp {
                     return;
                 }
 
-                Self::log_send(
-                    &log_tx,
-                    format!("MP3Party: пробую {}", download_url),
-                );
+                Self::log_send(&log_tx, format!("MP3Party: пробую {}", download_url));
 
-                let resp = match Self::mp3party_request(&client, &download_url, &track_page)
-                    .send()
+                let resp = match Self::mp3party_request(&client, &download_url, &track_page).send()
                 {
                     Ok(r) if r.status().is_success() => r,
                     Ok(r) => {
@@ -1810,10 +1779,7 @@ impl LinkParserApp {
                     continue;
                 }
 
-                Self::log_send(
-                    &log_tx,
-                    format!("✅ MP3Party: {}", filepath.display()),
-                );
+                Self::log_send(&log_tx, format!("✅ MP3Party: {}", filepath.display()));
                 let mut s = status.lock().unwrap();
                 *s = DownloadStatus::Completed(filepath.to_string_lossy().to_string());
                 return;
@@ -1831,10 +1797,7 @@ impl LinkParserApp {
                 stop_if_cancelled(&status, &filepath);
                 return;
             }
-            fail(
-                &status,
-                format!("{hint} Страница: {track_page}"),
-            );
+            fail(&status, format!("{hint} Страница: {track_page}"));
         });
     }
 
@@ -1855,10 +1818,7 @@ impl LinkParserApp {
         if u.starts_with('/') && u.ends_with(".html") {
             return Ok(format!("{}{}", DRIVEMUSIC_BASE, u));
         }
-        Err(
-            "DriveMusic: нет ссылки на страницу трека — найдите трек через поиск."
-                .into(),
-        )
+        Err("DriveMusic: нет ссылки на страницу трека — найдите трек через поиск.".into())
     }
 
     fn drivemusic_extract_mp3_urls(html: &str) -> Vec<String> {
@@ -1891,7 +1851,10 @@ impl LinkParserApp {
             .get(&url)
             .header("User-Agent", BROWSER_USER_AGENT)
             .header("Referer", DRIVEMUSIC_BASE)
-            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header(
+                "Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            )
             .header("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
             .send()
             .map_err(|e| format!("Ошибка запроса: {}", e))?;
@@ -2024,10 +1987,7 @@ impl LinkParserApp {
                     }
                 },
                 Ok(r) => {
-                    fail(
-                        &status,
-                        format!("Страница трека: HTTP {}", r.status()),
-                    );
+                    fail(&status, format!("Страница трека: HTTP {}", r.status()));
                     return;
                 }
                 Err(e) => {
@@ -2054,10 +2014,7 @@ impl LinkParserApp {
                     return;
                 }
 
-                Self::log_send(
-                    &log_tx,
-                    format!("DriveMusic: пробую {}", download_url),
-                );
+                Self::log_send(&log_tx, format!("DriveMusic: пробую {}", download_url));
 
                 let resp = match client
                     .get(&download_url)
@@ -2139,10 +2096,7 @@ impl LinkParserApp {
                     continue;
                 }
 
-                Self::log_send(
-                    &log_tx,
-                    format!("✅ DriveMusic: {}", filepath.display()),
-                );
+                Self::log_send(&log_tx, format!("✅ DriveMusic: {}", filepath.display()));
                 let mut s = status.lock().unwrap();
                 *s = DownloadStatus::Completed(filepath.to_string_lossy().to_string());
                 return;
@@ -2150,9 +2104,7 @@ impl LinkParserApp {
 
             fail(
                 &status,
-                format!(
-                    "DriveMusic: {last_err}. Страница: {track_page} (ссылки временные)"
-                ),
+                format!("DriveMusic: {last_err}. Страница: {track_page} (ссылки временные)"),
             );
         });
     }
@@ -2350,10 +2302,7 @@ impl LinkParserApp {
                     "yt-dlp завершился без файла (возможно, трек уже в архиве)".into(),
                 );
             } else {
-                fail(
-                    &status,
-                    format!("yt-dlp завершился с кодом {}", exit_code),
-                );
+                fail(&status, format!("yt-dlp завершился с кодом {}", exit_code));
             }
         });
     }
@@ -2408,7 +2357,11 @@ impl LinkParserApp {
         self.begin_loading();
         self.output_mode = OutputMode::UrlParsing;
         self.status = format!("⏳ Парсинг {} треков...", ids.len());
-        self.push_log_line(format!("[{}] ⏳ Парсинг {} треков...", Self::log_timestamp(), ids.len()));
+        self.push_log_line(format!(
+            "[{}] ⏳ Парсинг {} треков...",
+            Self::log_timestamp(),
+            ids.len()
+        ));
 
         let log_tx = self.log_tx.clone();
         thread::spawn(move || {
@@ -2437,17 +2390,10 @@ impl LinkParserApp {
         if source == DownloadSource::YtDlp {
             if let Err(err) = Self::require_yt_dlp_ui() {
                 self.status = format!("❌ {}", err);
-                self.push_log_line(format!(
-                    "[{}] ❌ yt-dlp: {}",
-                    Self::log_timestamp(),
-                    err
-                ));
+                self.push_log_line(format!("[{}] ❌ yt-dlp: {}", Self::log_timestamp(), err));
                 return;
             }
-            self.push_log_line(format!(
-                "[{}] ✅ yt-dlp готов",
-                Self::log_timestamp()
-            ));
+            self.push_log_line(format!("[{}] ✅ yt-dlp готов", Self::log_timestamp()));
         }
 
         self.tracks.clear();
@@ -2461,11 +2407,7 @@ impl LinkParserApp {
         self.error_count = 0;
         self.last_error = None;
         self.begin_loading();
-        self.status = format!(
-            "⏳ Поиск [{}] «{}»...",
-            source.label(),
-            query
-        );
+        self.status = format!("⏳ Поиск [{}] «{}»...", source.label(), query);
         self.push_log_line(format!(
             "[{}] ⏳ Поиск [{}] «{}»...",
             Self::log_timestamp(),
@@ -2507,8 +2449,10 @@ impl LinkParserApp {
             for task in &self.download_tasks {
                 let s = task.status.lock().unwrap();
                 let same_ytdlp_fmt = task.ytdlp_format == Some(ytdlp_format);
-                if matches!(*s, DownloadStatus::Downloading { .. } | DownloadStatus::Pending)
-                    && task.track.id == track.id
+                if matches!(
+                    *s,
+                    DownloadStatus::Downloading { .. } | DownloadStatus::Pending
+                ) && task.track.id == track.id
                     && task.source == source
                     && (source != DownloadSource::YtDlp || same_ytdlp_fmt)
                 {
@@ -2541,22 +2485,10 @@ impl LinkParserApp {
             let log_tx = self.log_tx.clone();
             match source {
                 DownloadSource::Mp3Party => {
-                    Self::download_track_mp3party(
-                        track.clone(),
-                        folder,
-                        status,
-                        cancel,
-                        log_tx,
-                    );
+                    Self::download_track_mp3party(track.clone(), folder, status, cancel, log_tx);
                 }
                 DownloadSource::DriveMusic => {
-                    Self::download_track_drivemusic(
-                        track.clone(),
-                        folder,
-                        status,
-                        cancel,
-                        log_tx,
-                    );
+                    Self::download_track_drivemusic(track.clone(), folder, status, cancel, log_tx);
                 }
                 DownloadSource::YtDlp => {
                     Self::download_track_ytdlp(
@@ -2586,7 +2518,10 @@ impl LinkParserApp {
         }
     }
 
-    fn task_source_label(source: DownloadSource, ytdlp_format: Option<YtDlpFormat>) -> &'static str {
+    fn task_source_label(
+        source: DownloadSource,
+        ytdlp_format: Option<YtDlpFormat>,
+    ) -> &'static str {
         match (source, ytdlp_format) {
             (DownloadSource::YtDlp, Some(YtDlpFormat::Mp3)) => "YouTube MP3",
             (DownloadSource::YtDlp, Some(YtDlpFormat::Mp4)) => "YouTube MP4",
@@ -2720,10 +2655,7 @@ impl LinkParserApp {
                                     .animate(true)
                                     .fill(theme.progress)
                                     .desired_width(ui.available_width())
-                                    .text(format!(
-                                        "{} скачано",
-                                        Self::format_bytes(*bytes)
-                                    )),
+                                    .text(format!("{} скачано", Self::format_bytes(*bytes))),
                             );
                         }
                     }
@@ -2971,7 +2903,6 @@ impl eframe::App for LinkParserApp {
 // ═══════════════════════════════════════════
 
 impl LinkParserApp {
-
     fn show_main_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
         theme.card().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -3028,9 +2959,7 @@ impl LinkParserApp {
 
             ui.add_space(4.0);
             let hint = match self.download_source {
-                DownloadSource::Mp3Party => {
-                    "Поиск на mp3party.net, скачивание online/download URL"
-                }
+                DownloadSource::Mp3Party => "Поиск на mp3party.net, скачивание online/download URL",
                 DownloadSource::DriveMusic => {
                     "Поиск на drivemusic.me; ссылки на MP3 временные — скачивание со страницы трека"
                 }
@@ -3038,16 +2967,10 @@ impl LinkParserApp {
                     YtDlpFormat::Mp3 => {
                         "YouTube: поиск ytsearch, скачивание MP3 (-x --audio-format mp3)"
                     }
-                    YtDlpFormat::Mp4 => {
-                        "YouTube: поиск ytsearch, скачивание MP4 (видео+аудио)"
-                    }
+                    YtDlpFormat::Mp4 => "YouTube: поиск ytsearch, скачивание MP4 (видео+аудио)",
                 },
             };
-            ui.label(
-                egui::RichText::new(hint)
-                    .size(11.0)
-                    .color(theme.text_muted),
-            );
+            ui.label(egui::RichText::new(hint).size(11.0).color(theme.text_muted));
         });
 
         ui.add_space(8.0);
@@ -3125,8 +3048,7 @@ impl LinkParserApp {
                             self.cancel_loading();
                         }
 
-                        let enter_in_search = ui
-                            .input(|i| i.key_pressed(egui::Key::Enter))
+                        let enter_in_search = ui.input(|i| i.key_pressed(egui::Key::Enter))
                             && search_resp.has_focus();
 
                         if search_clicked || enter_in_search {
@@ -3165,10 +3087,7 @@ impl LinkParserApp {
                 {
                     let mut text = String::from("ID\tИсполнитель\tНазвание\tСсылка\n");
                     for t in &self.tracks {
-                        text.push_str(&format!(
-                            "{}\t{}\t{}\t{}\n",
-                            t.id, t.artist, t.title, t.url
-                        ));
+                        text.push_str(&format!("{}\t{}\t{}\t{}\n", t.id, t.artist, t.title, t.url));
                     }
                     ui.output_mut(|o| o.copied_text = text);
                     self.status = "📋 Скопировано в буфер".into();
@@ -3202,8 +3121,7 @@ impl LinkParserApp {
                 );
                 if ui
                     .link(
-                        egui::RichText::new(self.downloads_folder.display().to_string())
-                            .size(11.0),
+                        egui::RichText::new(self.downloads_folder.display().to_string()).size(11.0),
                     )
                     .on_hover_text("Открыть папку")
                     .clicked()
@@ -3219,10 +3137,7 @@ impl LinkParserApp {
         theme.status_bar().show(ui, |ui| {
             ui.horizontal(|ui| {
                 let color = theme.status_color(&self.status, self.loading);
-                ui.colored_label(
-                    color,
-                    egui::RichText::new(&self.status).size(13.0),
-                );
+                ui.colored_label(color, egui::RichText::new(&self.status).size(13.0));
             });
         });
 
@@ -3312,9 +3227,7 @@ impl LinkParserApp {
                             .min_col_width(60.0)
                             .show(ui, |ui| {
                                 ui.strong(
-                                    egui::RichText::new("ID")
-                                        .size(12.0)
-                                        .color(theme.text_muted),
+                                    egui::RichText::new("ID").size(12.0).color(theme.text_muted),
                                 );
                                 ui.strong(
                                     egui::RichText::new("Исполнитель")
@@ -3327,9 +3240,7 @@ impl LinkParserApp {
                                         .color(theme.text_muted),
                                 );
                                 ui.strong(
-                                    egui::RichText::new(" ")
-                                        .size(12.0)
-                                        .color(theme.text_muted),
+                                    egui::RichText::new(" ").size(12.0).color(theme.text_muted),
                                 );
                                 ui.end_row();
 
@@ -3345,8 +3256,7 @@ impl LinkParserApp {
                                         .clicked()
                                     {
                                         ui.output_mut(|o| o.copied_text = track.id.clone());
-                                        self.status =
-                                            format!("📋 ID {} скопирован", track.id);
+                                        self.status = format!("📋 ID {} скопирован", track.id);
                                     }
 
                                     ui.label(
@@ -3386,10 +3296,7 @@ impl LinkParserApp {
                                         }
                                     });
 
-                                    if ui
-                                        .small_button("✕")
-                                        .on_hover_text("Убрать")
-                                        .clicked()
+                                    if ui.small_button("✕").on_hover_text("Убрать").clicked()
                                     {
                                         to_remove = Some(*i);
                                     }
@@ -3413,11 +3320,7 @@ impl LinkParserApp {
             ui.vertical_centered(|ui| {
                 theme.card().show(ui, |ui| {
                     ui.vertical_centered(|ui| {
-                        ui.label(
-                            egui::RichText::new("🎧")
-                                .size(36.0)
-                                .color(theme.text_muted),
-                        );
+                        ui.label(egui::RichText::new("🎧").size(36.0).color(theme.text_muted));
                         ui.add_space(8.0);
                         ui.label(
                             egui::RichText::new("Вставьте ссылки или найдите треки")
@@ -3449,10 +3352,7 @@ impl LinkParserApp {
                 }
                 if ui.add(theme.neutral_button("🗑 Очистить")).clicked() {
                     self.log_lines.clear();
-                    self.push_log_line(format!(
-                        "[{}] Лог очищен.",
-                        Self::log_timestamp()
-                    ));
+                    self.push_log_line(format!("[{}] Лог очищен.", Self::log_timestamp()));
                 }
             });
         });
@@ -3495,10 +3395,7 @@ impl LinkParserApp {
         ui.horizontal(|ui| {
             ui.label(
                 theme
-                    .section_title(&format!(
-                        "📥 {} задач",
-                        self.download_tasks.len()
-                    ))
+                    .section_title(&format!("📥 {} задач", self.download_tasks.len()))
                     .size(14.0),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -3656,10 +3553,8 @@ impl LinkParserApp {
                                 ui.colored_label(theme.error, format!("❌ {}", err));
                                 ui.horizontal(|ui| {
                                     if task.source == DownloadSource::Mp3Party {
-                                        let page = format!(
-                                            "https://mp3party.net/music/{}",
-                                            track.id
-                                        );
+                                        let page =
+                                            format!("https://mp3party.net/music/{}", track.id);
                                         if ui
                                             .add(theme.neutral_button("🌐 Браузер"))
                                             .on_hover_text("Открыть страницу трека")
@@ -3725,4 +3620,3 @@ fn main() -> Result<(), eframe::Error> {
         Box::new(|_cc| Ok(Box::new(LinkParserApp::default()))),
     )
 }
- 

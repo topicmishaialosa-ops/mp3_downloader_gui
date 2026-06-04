@@ -4,3 +4,5 @@ linker = "x86_64-w64-mingw32-clang"
 ar = "x86_64-w64-mingw32-ar"
 
 # Windows MSVC — CI и BUILD_WINDOWS_MSVC=1 (cargo-xwin)
+# cargo-xwin сам настраивает linker/ar через переменные среды, дополнительная
+# конфигурация здесь не требуется.

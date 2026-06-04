@@ -85,11 +85,7 @@ impl AudioPlayer {
         let s = secs.max(0.0);
         match self.mode {
             PlayMode::External => {
-                self.send_mpv(&[
-                    "seek",
-                    &format!("{:.2}", s),
-                    "absolute",
-                ]);
+                self.send_mpv(&["seek", &format!("{:.2}", s), "absolute"]);
                 self.state.position_secs = s;
             }
             PlayMode::Rodio => {
@@ -119,10 +115,8 @@ impl AudioPlayer {
         let (_stream, handle) =
             OutputStream::try_default().map_err(|e| format!("Аудиоустройство: {}", e))?;
         let sink = Sink::try_new(&handle).map_err(|e| format!("Sink: {}", e))?;
-        let file =
-            std::fs::File::open(path).map_err(|e| format!("Файл: {}", e))?;
-        let source = Decoder::new(BufReader::new(file))
-            .map_err(|e| format!("Декодер: {}", e))?;
+        let file = std::fs::File::open(path).map_err(|e| format!("Файл: {}", e))?;
+        let source = Decoder::new(BufReader::new(file)).map_err(|e| format!("Декодер: {}", e))?;
         let duration = source
             .total_duration()
             .map(|d| d.as_secs_f64())
@@ -144,7 +138,13 @@ impl AudioPlayer {
         Ok(())
     }
 
-    pub fn play_url(&mut self, url: &str, title: &str, subtitle: &str, is_video: bool) -> Result<(), String> {
+    pub fn play_url(
+        &mut self,
+        url: &str,
+        title: &str,
+        subtitle: &str,
+        is_video: bool,
+    ) -> Result<(), String> {
         if let Some(mpv) = Self::resolve_mpv() {
             return self
                 .play_external_with(url, title, is_video, &mpv)
@@ -184,8 +184,7 @@ impl AudioPlayer {
     }
 
     fn play_external(&mut self, target: &str, title: &str, is_video: bool) -> Result<(), String> {
-        let mpv = Self::resolve_mpv()
-            .ok_or_else(|| "mpv не найден".to_string())?;
+        let mpv = Self::resolve_mpv().ok_or_else(|| "mpv не найден".to_string())?;
         self.play_external_with(target, title, is_video, &mpv)
     }
 
@@ -384,7 +383,9 @@ fn install_mpv_portable() -> Result<PathBuf, String> {
     extract_mpv_7z(&tmp, &extract)?;
 
     let found = find_mpv_in_tree(&extract).ok_or_else(|| "mpv не найден в архиве".to_string())?;
-    let src_dir = found.parent().ok_or_else(|| "Нет каталога mpv".to_string())?;
+    let src_dir = found
+        .parent()
+        .ok_or_else(|| "Нет каталога mpv".to_string())?;
     let dest = AudioPlayer::mpv_install_dir();
     let _ = fs::remove_dir_all(&dest);
     copy_dir_all(src_dir, &dest).map_err(|e| e.to_string())?;

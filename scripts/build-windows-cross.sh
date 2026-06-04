@@ -38,12 +38,13 @@ if [ "${BUILD_WINDOWS_MSVC:-0}" = "1" ]; then
     cp -f "$SRC" "$OUT_DIR/$BIN_NAME"
 else
     TARGET="x86_64-pc-windows-gnu"
-    LLVM_TAG="llvm-mingw-20260505-ucrt-ubuntu-22.04-x86_64"
-    LLVM_DIR="${LLVM_DIR:-$HOME/.local/$LLVM_TAG}"
+    # Актуальный тег llvm-mingw можно переопределить: LLVM_MINGW_TAG=20260602 ./scripts/build-windows-cross.sh
+    LLVM_MINGW_TAG="${LLVM_MINGW_TAG:-20260602}"
+    LLVM_DIR="${LLVM_DIR:-$HOME/.local/llvm-mingw-$LLVM_MINGW_TAG}"
     if [ ! -x "$LLVM_DIR/bin/x86_64-w64-mingw32-clang" ]; then
-        echo "==> Скачивание llvm-mingw (один раз)…"
+        echo "==> Скачивание llvm-mingw $LLVM_MINGW_TAG (один раз)…"
         curl -fL --retry 3 \
-            "https://github.com/mstorsjo/llvm-mingw/releases/download/20260505/${LLVM_TAG}.tar.xz" \
+            "https://github.com/mstorsjo/llvm-mingw/releases/download/${LLVM_MINGW_TAG}/llvm-mingw-${LLVM_MINGW_TAG}-ucrt-ubuntu-22.04-x86_64.tar.xz" \
             -o /tmp/llvm-mingw.tar.xz
         mkdir -p "$HOME/.local"
         tar -xJf /tmp/llvm-mingw.tar.xz -C "$HOME/.local"
