@@ -115,6 +115,15 @@
                 android:layout_marginTop="10dp"
                 android:text="@string/search"
                 app:icon="@drawable/ic_search" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/batchButton"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="@string/batch_search"
+                app:icon="@drawable/ic_search" />
         </LinearLayout>
     </com.google.android.material.appbar.AppBarLayout>
 

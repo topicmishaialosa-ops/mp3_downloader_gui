@@ -3,6 +3,7 @@
 #include <QMainWindow>
 #include <QVector>
 
+#include "batchqueries.h"
 #include "downloadmanager.h"
 #include "downloadsource.h"
 #include "libraryscanner.h"
@@ -27,6 +28,7 @@ public:
 
 private slots:
     void onSearch();
+    void onBatchSearch();
     void onBrowseFolder();
     void onDownloadSelected();
     void onDownloadAll();
@@ -36,6 +38,9 @@ private slots:
     void onLog(const QString &line);
     void onPlayPause();
     void onStopPlayer();
+
+    /// Запустить последовательный поиск по списку запросов (batch).
+    void runBatchQuery(QVector<BatchQuery> queries, int index);
 
 private:
     void setupUi();

@@ -6,11 +6,13 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -69,6 +71,8 @@ class SearchFragment : Fragment() {
                 (activity as? MainActivity)?.startDownloadAll(tracks, ytFormat)
             }
         }
+
+        binding.batchButton.setOnClickListener { openBatchDialog() }
 
         updateYtdlpStatus()
         updateEmptyState(show = true, hasResults = false)
@@ -167,6 +171,109 @@ class SearchFragment : Fragment() {
     private fun hideKeyboard() {
         val imm = requireContext().getSystemService(InputMethodManager::class.java) ?: return
         imm.hideSoftInputFromWindow(binding.searchInput.windowToken, 0)
+    }
+
+    private fun openBatchDialog() {
+        val ctx = requireContext()
+        val edit = EditText(ctx).apply {
+            hint = "Кино - Группа крови\nАгата Кристи - Опиум для никого\nСектор Газа - Лирика"
+            setSingleLine(false)
+            setLines(8)
+            minLines = 4
+            maxLines = 16
+            setHorizontallyScrolling(true)
+            setTextAppearance(android.R.style.TextAppearance_Material_Body1)
+        }
+        val scroll = android.widget.ScrollView(ctx).apply {
+            setPadding(48, 24, 48, 24)
+            addView(edit)
+        }
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle("📋 Пакетный поиск")
+            .setMessage(
+                "По одному треку на строку.\n" +
+                    "Формат: «Исполнитель - Название», «Название» (без разделителя), или URL.\n" +
+                    "Нумерация («1. », «12) ») и комментарии после «#» игнорируются.",
+            )
+            .setView(scroll)
+            .setPositiveButton("▶ Найти по списку") { _, _ ->
+                val text = edit.text?.toString().orEmpty()
+                runBatchSearch(text)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun runBatchSearch(input: String) {
+        val queries = BatchQueryParser.parse(input)
+        if (queries.isEmpty()) {
+            Snackbar.make(binding.root, "Список пуст", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        (activity as? MainActivity)?.showLoading(
+            true,
+            "Пакетный поиск: ${queries.size} запрос(ов)…",
+        )
+        binding.statusText.text = "⏳ Пакетный поиск (${queries.size})…"
+        binding.searchButton.isEnabled = false
+        binding.batchButton.isEnabled = false
+
+        lifecycleScope.launch {
+            try {
+                if (source == DownloadSource.YouTube) {
+                    val activity = activity as? MainActivity
+                    if (activity == null || !activity.ensureYtDlp()) {
+                        binding.statusText.text = "❌ ${getString(R.string.ytdlp_not_installed)}"
+                        return@launch
+                    }
+                }
+                val collected = mutableListOf<Track>()
+                var errorCount = 0
+                val app = requireContext().applicationContext
+                queries.forEachIndexed { idx, q ->
+                    val num = idx + 1
+                    if (q.isUrl) {
+                        binding.statusText.text = "[$num/${queries.size}] ⚠️ URL в списке не поддерживается"
+                        return@forEachIndexed
+                    }
+                    binding.statusText.text = "[$num/${queries.size}] 🔎 ${q.searchText()}"
+                    try {
+                        val results = withContext(Dispatchers.IO) {
+                            when (source) {
+                                DownloadSource.MP3Party -> Mp3PartyApi.search(q.searchText())
+                                DownloadSource.DriveMusic -> DriveMusicApi.search(q.searchText())
+                                DownloadSource.YouTube -> YtDlpHelper.search(app, q.searchText())
+                            }
+                        }
+                        if (results.isNotEmpty()) {
+                            collected.addAll(results)
+                        } else {
+                            errorCount++
+                        }
+                    } catch (e: Exception) {
+                        errorCount++
+                    }
+                }
+                // Дедупликация по id в пределах источника.
+                val unique = collected.distinctBy { "${it.source}:${it.id}" }
+                adapter.submit(unique)
+                updateEmptyState(show = unique.isEmpty(), hasResults = unique.isNotEmpty())
+                binding.statusText.text = if (unique.isNotEmpty()) {
+                    "✅ Найдено ${unique.size} (из ${queries.size} запрос(ов)" +
+                        (if (errorCount > 0) ", ошибок: $errorCount" else "") + ")"
+                } else {
+                    "Ничего не найдено"
+                }
+            } catch (e: Exception) {
+                binding.statusText.text = "❌ ${e.message}"
+                Snackbar.make(binding.root, e.message ?: "Ошибка", Snackbar.LENGTH_LONG).show()
+            } finally {
+                (activity as? MainActivity)?.showLoading(false, "")
+                binding.searchButton.isEnabled = true
+                binding.batchButton.isEnabled = true
+                updateYtdlpStatus()
+            }
+        }
     }
 
     private fun updateEmptyState(show: Boolean, hasResults: Boolean) {

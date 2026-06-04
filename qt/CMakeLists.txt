@@ -33,6 +33,8 @@ qt_add_executable(mp3_downloader_gui_qt
     src/playercontroller.h
     src/libraryscanner.cpp
     src/libraryscanner.h
+    src/batchqueries.cpp
+    src/batchqueries.h
 )
 
 target_link_libraries(mp3_downloader_gui_qt PRIVATE

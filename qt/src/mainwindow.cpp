@@ -2,6 +2,8 @@
 
 #include <QApplication>
 #include <QComboBox>
+#include <QDialog>
+#include <QFontDatabase>
 #include <QLineEdit>
 #include <QListWidgetItem>
 #include <QDesktopServices>
@@ -57,13 +59,18 @@ void MainWindow::setupUi() {
     m_queryEdit = new QLineEdit();
     m_queryEdit->setPlaceholderText(QStringLiteral("Исполнитель или название…"));
     m_searchBtn = new QPushButton(QStringLiteral("🔍 Найти"));
+    auto *batchBtn = new QPushButton(QStringLiteral("📋 Список"));
+    batchBtn->setToolTip(QStringLiteral(
+        "Пакетный поиск: по одному треку на строку\n(Исполнитель - Название)"));
     connect(m_searchBtn, &QPushButton::clicked, this, &MainWindow::onSearch);
+    connect(batchBtn, &QPushButton::clicked, this, &MainWindow::onBatchSearch);
     top->addWidget(new QLabel(QStringLiteral("Источник:")));
     top->addWidget(m_sourceCombo);
     top->addWidget(new QLabel(QStringLiteral("YT:")));
     top->addWidget(m_ytFormatCombo);
     top->addWidget(m_queryEdit, 1);
     top->addWidget(m_searchBtn);
+    top->addWidget(batchBtn);
 
     auto *folderRow = new QHBoxLayout();
     m_folderEdit = new QLineEdit();
@@ -319,6 +326,112 @@ void MainWindow::onSearch() {
                 m_resultsList->addItem(QStringLiteral("%1 — %2").arg(t.artist, t.title));
             }
             onLog(QStringLiteral("Найдено: %1").arg(m_tracks.size()));
+        });
+    });
+}
+
+void MainWindow::onBatchSearch() {
+    // Спрашиваем у пользователя список треков в многострочном диалоге.
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("📋 Пакетный поиск"));
+    dlg.resize(560, 420);
+    auto *lay = new QVBoxLayout(&dlg);
+    lay->addWidget(new QLabel(QStringLiteral(
+        "По одному треку на строку.\n"
+        "Формат: «Исполнитель - Название», «Название» (без разделителя), или URL.\n"
+        "Нумерация («1. », «12) ») и комментарии после «#» игнорируются.")));
+    auto *edit = new QPlainTextEdit(&dlg);
+    edit->setPlaceholderText(QStringLiteral(
+        "Кино - Группа крови\n"
+        "Агата Кристи - Опиум для никого\n"
+        "https://www.youtube.com/watch?v=…"));
+    edit->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    lay->addWidget(edit);
+    auto *counter = new QLabel(QStringLiteral("Будет отправлено запросов: 0"));
+    lay->addWidget(counter);
+    auto updateCounter = [edit, counter]() {
+        const int n = BatchQueries::parse(edit->toPlainText()).size();
+        counter->setText(QStringLiteral("Будет отправлено запросов: %1").arg(n));
+    };
+    QObject::connect(edit, &QPlainTextEdit::textChanged, &dlg, updateCounter);
+    auto *btnRow = new QHBoxLayout();
+    btnRow->addStretch();
+    auto *cancelBtn = new QPushButton(QStringLiteral("Отмена"));
+    auto *okBtn = new QPushButton(QStringLiteral("▶ Найти по списку"));
+    okBtn->setDefault(true);
+    btnRow->addWidget(cancelBtn);
+    btnRow->addWidget(okBtn);
+    lay->addLayout(btnRow);
+    QObject::connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+    QObject::connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+    if (dlg.exec() != QDialog::Accepted) {
+        return;
+    }
+
+    const auto queries = BatchQueries::parse(edit->toPlainText());
+    if (queries.isEmpty()) {
+        QMessageBox::warning(this, QString(), QStringLiteral("Список пуст"));
+        return;
+    }
+    if (currentSource() == DownloadSource::YtDlp && !ensureYtDlp()) {
+        return;
+    }
+
+    m_searchBtn->setEnabled(false);
+    m_progress->setVisible(true);
+    m_resultsList->clear();
+    m_tracks.clear();
+    onLog(QStringLiteral("⏳ Пакетный поиск: %1 запрос(ов)…").arg(queries.size()));
+    runBatchQuery(queries, 0);
+}
+
+void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
+    if (index >= queries.size()) {
+        m_searchBtn->setEnabled(true);
+        m_progress->setVisible(false);
+        onLog(QStringLiteral("Готово. Всего найдено: %1").arg(m_tracks.size()));
+        return;
+    }
+    const BatchQuery q = queries.at(index);
+    const int total = queries.size();
+    const auto src = currentSource();
+    onLog(QStringLiteral("[%1/%2] 🔎 %3").arg(index + 1).arg(total).arg(q.searchText()));
+
+    if (q.isUrl()) {
+        onLog(QStringLiteral("  ⚠️ %1 — URL в пакетном режиме пока не поддерживается").arg(q.url));
+        QTimer::singleShot(0, this, [this, queries, index]() {
+            runBatchQuery(queries, index + 1);
+        });
+        return;
+    }
+
+    const QString query = q.searchText();
+    QtConcurrent::run([this, queries, index, total, src, query]() {
+        QString err;
+        QVector<Track> tracks;
+        switch (src) {
+        case DownloadSource::Mp3Party:
+            tracks = Mp3PartyApi::search(query, &err);
+            break;
+        case DownloadSource::DriveMusic:
+            tracks = DriveMusicApi::search(query, &err);
+            break;
+        case DownloadSource::YtDlp:
+            tracks = YtDlpHelper::search(query, &err);
+            break;
+        }
+        QTimer::singleShot(0, this, [this, tracks, err, queries, index]() {
+            if (!tracks.isEmpty()) {
+                for (const auto &t : tracks) {
+                    m_tracks.append(t);
+                    m_resultsList->addItem(
+                        QStringLiteral("%1 — %2").arg(t.artist, t.title));
+                }
+                onLog(QStringLiteral("  ✓ найдено: %1").arg(tracks.size()));
+            } else {
+                onLog(QStringLiteral("  ✗ %1").arg(err));
+            }
+            runBatchQuery(queries, index + 1);
         });
     });
 }

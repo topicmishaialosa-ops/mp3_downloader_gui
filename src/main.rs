@@ -1,6 +1,7 @@
 //! GUI: на Windows без отдельного консольного окна (подсистема windows).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
+mod batch;
 mod library;
 mod player;
 
@@ -354,6 +355,9 @@ struct CommandOutput {
 struct LinkParserApp {
     input_text: String,
     search_query: String,
+    /// Многострочное поле для пакетного поиска: по треку на строку
+    /// (`Исполнитель - Название`, либо URL).
+    batch_input: String,
     result_filter: String,
     tracks: Vec<TrackInfo>,
     status: String,
@@ -370,6 +374,8 @@ struct LinkParserApp {
     next_download_id: usize,
     show_downloads: bool,
     show_logs: bool,
+    /// Открыто ли модальное окно пакетного поиска.
+    show_batch_window: bool,
     log_lines: Vec<String>,
     log_tx: mpsc::Sender<String>,
     log_rx: mpsc::Receiver<String>,
@@ -390,6 +396,7 @@ impl Default for LinkParserApp {
         Self {
             input_text: String::new(),
             search_query: String::new(),
+            batch_input: String::new(),
             result_filter: String::new(),
             tracks: Vec::new(),
             status: "✅ Готов к работе.".into(),
@@ -405,6 +412,7 @@ impl Default for LinkParserApp {
             next_download_id: 0,
             show_downloads: false,
             show_logs: false,
+            show_batch_window: false,
             log_lines: vec!["✅ Приложение запущено.".to_string()],
             log_tx,
             log_rx,
@@ -2436,6 +2444,94 @@ impl LinkParserApp {
         });
     }
 
+    /// Пакетный поиск: берёт `self.batch_input`, режет на запросы, ищет
+    /// каждый в выбранном источнике, аккумулирует результаты.
+    fn start_batch_search(&mut self) {
+        let queries = batch::parse_batch_queries(&self.batch_input);
+        if queries.is_empty() {
+            self.status = "⚠️ Введите хотя бы один запрос в список.".into();
+            return;
+        }
+        let source = self.download_source;
+        if source == DownloadSource::YtDlp {
+            if let Err(err) = Self::require_yt_dlp_ui() {
+                self.status = format!("❌ {}", err);
+                return;
+            }
+        }
+
+        self.tracks.clear();
+        self.result_filter.clear();
+        self.output_mode = OutputMode::Search;
+
+        let (tx, rx) = mpsc::channel();
+        self.rx = Some(rx);
+        self.total_urls = queries.len();
+        self.processed = 0;
+        self.error_count = 0;
+        self.last_error = None;
+        self.begin_loading();
+        self.status = format!(
+            "⏳ Пакетный поиск [{}]: {} запрос(ов)…",
+            source.label(),
+            queries.len()
+        );
+        self.push_log_line(format!(
+            "[{}] ⏳ Пакетный поиск [{}]: {} запрос(ов)",
+            Self::log_timestamp(),
+            source.label(),
+            queries.len()
+        ));
+
+        let log_tx = self.log_tx.clone();
+        thread::spawn(move || {
+            let total = queries.len();
+            for (i, q) in queries.into_iter().enumerate() {
+                let num = i + 1;
+                Self::log_send(
+                    &log_tx,
+                    format!("[{}/{}] 🔎 {}", num, total, q.search_text()),
+                );
+                if let Some(url) = q.url {
+                    // Прямой URL — пропускаем пока как ошибку формата:
+                    // batch-режим создавался для поиска, а прямая загрузка уже
+                    // реализована через «Парсить ссылки».
+                    Self::log_send(
+                        &log_tx,
+                        format!(
+                            "⚠️ URL '{}' пропущен — вставьте ссылку в основное поле «Парсить ссылки»",
+                            url
+                        ),
+                    );
+                    let _ = tx.send(ParseResult::Error(
+                        url,
+                        "URL в batch-режиме не поддерживается".into(),
+                    ));
+                    continue;
+                }
+                let q_text = q.search_text();
+                let result = match source {
+                    DownloadSource::Mp3Party => Self::search_tracks(&q_text),
+                    DownloadSource::DriveMusic => Self::search_tracks_drivemusic(&q_text),
+                    DownloadSource::YtDlp => Self::search_tracks_ytdlp(&q_text),
+                };
+                match result {
+                    Ok(mut tracks) => {
+                        Self::log_send(
+                            &log_tx,
+                            format!("  ✓ {}/{}: найдено {}", num, total, tracks.len()),
+                        );
+                        let _ = tx.send(ParseResult::SearchResults(std::mem::take(&mut tracks)));
+                    }
+                    Err(err) => {
+                        Self::log_send(&log_tx, format!("  ✗ {}/{}: {}", num, total, err));
+                        let _ = tx.send(ParseResult::Error(q_text, err));
+                    }
+                }
+            }
+        });
+    }
+
     fn start_download(&mut self, track_idx: usize) {
         let source = self.download_source;
         let ytdlp_format = self.ytdlp_format;
@@ -2867,6 +2963,23 @@ impl eframe::App for LinkParserApp {
                 });
         }
 
+        if self.show_batch_window {
+            egui::Window::new("📋 Пакетный поиск")
+                .id("batch_window".into())
+                .resizable(true)
+                .default_size([560.0, 420.0])
+                .collapsible(true)
+                .frame(
+                    Frame::window(&ctx.style())
+                        .fill(theme.card_bg)
+                        .stroke(Stroke::new(1.0, theme.card_border))
+                        .rounding(Rounding::same(10.0)),
+                )
+                .show(ctx, |ui| {
+                    self.show_batch_panel(ui, theme);
+                });
+        }
+
         egui::CentralPanel::default()
             .frame(Frame {
                 fill: theme.window_bg,
@@ -2903,6 +3016,61 @@ impl eframe::App for LinkParserApp {
 // ═══════════════════════════════════════════
 
 impl LinkParserApp {
+    /// Панель пакетного поиска: многострочное поле + кнопки «Найти» / «Закрыть».
+    fn show_batch_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        ui.label(
+            egui::RichText::new(
+                "Введите по одному треку на строку.\n\
+                 Формат: «Исполнитель - Название», «Название» (без разделителя), или URL.\n\
+                 Нумерация («1. », «12) ») и комментарии после «#» игнорируются.\n\
+                 Источник: ",
+            )
+            .size(12.0)
+            .color(theme.text_secondary),
+        );
+        ui.label(
+            egui::RichText::new(self.download_source.label())
+                .size(13.0)
+                .strong()
+                .color(theme.accent),
+        );
+        ui.add_space(6.0);
+        egui::ScrollArea::vertical()
+            .max_height(220.0)
+            .show(ui, |ui| {
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.batch_input)
+                        .desired_rows(8)
+                        .desired_width(f32::INFINITY)
+                        .font(egui::TextStyle::Monospace)
+                        .hint_text("Кино - Группа крови\nАгата Кристи - Опиум для никого\nСектор Газа - Лирика\nhttps://www.youtube.com/watch?v=…"),
+                );
+            });
+        ui.add_space(6.0);
+        let parsed = batch::parse_batch_queries(&self.batch_input);
+        ui.label(
+            egui::RichText::new(format!("Будет отправлено запросов: {}", parsed.len()))
+                .size(11.0)
+                .color(theme.text_muted),
+        );
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(!self.loading, theme.success_button("▶ Найти по списку"))
+                .clicked()
+            {
+                self.start_batch_search();
+                self.show_batch_window = false;
+            }
+            if ui.add(theme.neutral_button("Очистить")).clicked() {
+                self.batch_input.clear();
+            }
+            if ui.add(theme.neutral_button("Закрыть")).clicked() {
+                self.show_batch_window = false;
+            }
+        });
+    }
+
     fn show_main_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
         theme.card().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -3055,6 +3223,17 @@ impl LinkParserApp {
                             self.start_search();
                         }
                     });
+
+                    // Кнопка пакетного поиска: открывает окно со списком.
+                    if ui
+                        .add(theme.neutral_button("📋 Список"))
+                        .on_hover_text(
+                            "Пакетный поиск: по одному треку на строку\n(Исполнитель - Название)",
+                        )
+                        .clicked()
+                    {
+                        self.show_batch_window = true;
+                    }
                 });
             });
         });
