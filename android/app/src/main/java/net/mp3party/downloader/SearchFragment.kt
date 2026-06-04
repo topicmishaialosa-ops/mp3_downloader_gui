@@ -63,6 +63,13 @@ class SearchFragment : Fragment() {
             } else false
         }
 
+        binding.downloadAllButton.setOnClickListener {
+            val tracks = adapter.getItems()
+            if (tracks.isNotEmpty()) {
+                (activity as? MainActivity)?.startDownloadAll(tracks, ytFormat)
+            }
+        }
+
         updateYtdlpStatus()
         updateEmptyState(show = true, hasResults = false)
     }
@@ -165,6 +172,7 @@ class SearchFragment : Fragment() {
     private fun updateEmptyState(show: Boolean, hasResults: Boolean) {
         binding.emptyState.root.isVisible = show && !hasResults
         binding.resultsList.isVisible = hasResults
+        binding.downloadAllButton.isVisible = hasResults
     }
 
     private fun tracksWord(n: Int): String = when {

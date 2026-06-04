@@ -3265,6 +3265,17 @@ impl LinkParserApp {
                                 .size(12.0)
                                 .color(theme.text_muted),
                         );
+
+                        if ui
+                            .add(theme.success_button("📥 Скачать все"))
+                            .on_hover_text("Скачать все отфильтрованные треки")
+                            .clicked()
+                        {
+                            let filtered = self.filtered_track_indices();
+                            for idx in filtered {
+                                self.start_download(idx);
+                            }
+                        }
                     });
                 });
 

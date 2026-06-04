@@ -23,6 +23,8 @@ class TrackAdapter(
         notifyDataSetChanged()
     }
 
+    fun getItems(): List<Track> = items
+
     fun setDownloadingPosition(position: Int) {
         val old = downloadingPosition
         downloadingPosition = position

@@ -372,6 +372,57 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    fun startDownloadAll(
+        tracks: List<Track>,
+        format: YtFormat,
+    ) {
+        if (downloading || streaming) {
+            Snackbar.make(binding.root, "Дождитесь завершения операции", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        downloading = true
+        showLoading(true, "📥 Подготовка к скачиванию ${tracks.size} треков…")
+
+        lifecycleScope.launch {
+            var downloadedCount = 0
+            var errorCount = 0
+            for ((index, track) in tracks.withIndex()) {
+                val trackNum = index + 1
+                try {
+                    if (track.source == DownloadSource.YouTube && !ensureYtDlp()) {
+                        errorCount++
+                        continue
+                    }
+                    showLoading(true, "📥 $trackNum/${tracks.size}: ${track.artist} — ${track.title}")
+                    DownloadHelper.download(
+                        this@MainActivity,
+                        track,
+                        format,
+                    ) { pct, line ->
+                        runOnUiThread {
+                            binding.loadingText.text = if (line.isNotEmpty()) {
+                                "📥 $trackNum/${tracks.size} (${(pct * 100).toInt()}%): $line"
+                            } else {
+                                "📥 $trackNum/${tracks.size} (${(pct * 100).toInt()}%)"
+                            }
+                        }
+                    }
+                    downloadedCount++
+                } catch (e: Exception) {
+                    errorCount++
+                }
+            }
+            Snackbar.make(
+                binding.root,
+                "Успешно скачано: $downloadedCount/${tracks.size}" + (if (errorCount > 0) " (ошибок: $errorCount)" else ""),
+                Snackbar.LENGTH_LONG,
+            ).show()
+            libraryFragment?.refresh()
+            downloading = false
+            showLoading(false, "")
+        }
+    }
+
     fun playMedia(file: File, title: String, isVideo: Boolean) {
         PlaybackManager.play(this, file, title, isVideo)
         binding.playerBar.root.isVisible = true
