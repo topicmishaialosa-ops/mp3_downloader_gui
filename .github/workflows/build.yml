@@ -33,6 +33,22 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-
+
+      - name: Cache Cargo git
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/git
+          key: cargo-git-${{ hashFiles('Cargo.lock') }}
+          restore-keys: |
+            cargo-git-
+
       - name: Install deps (Linux)
         if: contains(matrix.target, 'linux')
         run: |
@@ -68,10 +84,8 @@ jobs:
         include:
           - os: ubuntu-latest
             name: mp3_downloader_gui_qt-linux-x86_64
-            artifact: qt/build/mp3_downloader_gui_qt
           - os: macos-latest
             name: mp3_downloader_gui_qt-macos-x86_64
-            artifact: qt/build/mp3_downloader_gui_qt
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -93,12 +107,19 @@ jobs:
           cmake -B qt/build -S qt -DCMAKE_BUILD_TYPE=Release
           cmake --build qt/build --parallel
 
-      - name: Upload artifact
-        if: success()
+      - name: Upload artifact (Linux)
+        if: runner.os == 'Linux'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
-          path: ${{ matrix.artifact }}
+          path: qt/build/mp3_downloader_gui_qt
+
+      - name: Upload artifact (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: qt/build/mp3_downloader_gui_qt.app
 
   build-android:
     runs-on: ubuntu-latest
@@ -110,6 +131,14 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: ~/.gradle/caches
+          key: gradle-${{ hashFiles('android/**/*.gradle*', 'android/gradle/wrapper/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-
 
       - name: Set up Android SDK
         run: |

@@ -32,6 +32,7 @@ object PlaybackManager {
 
     private var player: ExoPlayer? = null
     private var lastError: String? = null
+    private lateinit var appContext: Context
 
     var currentFile: File? = null
         private set
@@ -212,7 +213,7 @@ object PlaybackManager {
         isStream = false
         currentTitle = item.title
         isVideo = item.isVideo
-        val p = getPlayer(/* context needed but we use app-level */ file)
+        val p = getPlayer(appContext)
         p.stop()
         p.clearMediaItems()
         p.setMediaItem(MediaItem.fromUri(uriForFile(p.context, file)))
@@ -227,7 +228,7 @@ object PlaybackManager {
         isStream = true
         currentTitle = item.title
         isVideo = item.isVideo
-        val p = getPlayer(/* context needed */ item.pathOrUrl)
+        val p = getPlayer(appContext)
         p.stop()
         p.clearMediaItems()
         p.setMediaItem(MediaItem.fromUri(Uri.parse(item.pathOrUrl)))
@@ -237,6 +238,7 @@ object PlaybackManager {
     }
 
     fun play(context: Context, file: File, title: String, video: Boolean) {
+        appContext = context.applicationContext
         if (!file.exists()) {
             errorListener?.invoke("Файл не найден: ${file.name}")
             return
@@ -256,6 +258,7 @@ object PlaybackManager {
     }
 
     fun playStream(context: Context, url: String, title: String, trackId: String, video: Boolean) {
+        appContext = context.applicationContext
         playlist.clear()
         playlistIndex = 0
         playlist.add(
