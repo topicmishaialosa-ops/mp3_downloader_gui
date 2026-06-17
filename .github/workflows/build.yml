@@ -42,8 +42,9 @@ jobs:
         if: contains(matrix.target, 'windows')
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++-mingw-w64-x86-64
-          rustup target add x86_64-pc-windows-gnu
+          sudo apt-get install -y g++-mingw-w64-x86-64 mingw-w64-tools
+          echo '[target.x86_64-pc-windows-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "x86_64-w64-mingw32-gcc"' >> ~/.cargo/config.toml
 
       - name: Build
         run: |
@@ -58,7 +59,7 @@ jobs:
   create-release:
     needs: build-rust
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/master'
+    if: github.ref == 'refs/heads/master' && success()
     steps:
       - uses: actions/checkout@v4
 
