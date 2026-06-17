@@ -78,7 +78,7 @@ jobs:
           VERSION=$(grep '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           TAG="v${VERSION}-$(date +%Y%m%d-%H%M)"
           gh release create "$TAG" \
-            mp3_downloader_gui-*/* \
             --title "Build $TAG" \
-            --notes "Автоматическая сборка от $(date)" \
-            --generate-notes
+            --notes "Автоматическая сборка от $(date)"
+          sleep 5
+          find . -type f -path '*/mp3_downloader_gui*' -exec gh release upload "$TAG" {} --clobber \;
