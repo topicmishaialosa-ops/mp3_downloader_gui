@@ -180,8 +180,8 @@ jobs:
             --title "mp3 downloader gui ${VERSION}" \
             --notes "Автоматическая сборка от $(date)"
           sleep 5
-          for dir in */; do
+          for dir in mp3_downloader_gui*/; do
             name="${dir%/}"
-            file=$(find "$dir" -type f)
+            file=$(find "$dir" -type f | head -1)
             [ -n "$file" ] && mv "$file" "$dir/$name" && gh release upload "$TAG" "$dir/$name" --clobber
           done
