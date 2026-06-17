@@ -216,7 +216,7 @@ object PlaybackManager {
         val p = getPlayer(appContext)
         p.stop()
         p.clearMediaItems()
-        p.setMediaItem(MediaItem.fromUri(uriForFile(p.context, file)))
+        p.setMediaItem(MediaItem.fromUri(uriForFile(appContext, file)))
         p.prepare()
         p.play()
         emit()
