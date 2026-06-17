@@ -81,4 +81,8 @@ jobs:
             --title "Build $TAG" \
             --notes "Автоматическая сборка от $(date)"
           sleep 5
-          find . -type f -path '*/mp3_downloader_gui*' -exec gh release upload "$TAG" {} --clobber \;
+          for dir in mp3_downloader_gui-*/; do
+            name="${dir%/}"
+            file=$(find "$dir" -type f)
+            gh release upload "$TAG" "$file" --name "$name" --clobber
+          done
