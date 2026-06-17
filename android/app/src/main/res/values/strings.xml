@@ -30,4 +30,7 @@
     <string name="ytdlp_download">Скачать</string>
     <string name="ytdlp_not_installed">yt-dlp не установлен</string>
     <string name="folder_copy_hint">Путь скопирован в буфер:\n%s</string>
+    <string name="prev">Предыдущий</string>
+    <string name="next">Следующий</string>
+    <string name="loop">Повтор</string>
 </resources>

@@ -87,12 +87,15 @@ void MainWindow::setupUi() {
     auto *dlSel = new QPushButton(QStringLiteral("📥 Скачать"));
     auto *streamBtn = new QPushButton(QStringLiteral("▶ Слушать"));
     auto *dlAll = new QPushButton(QStringLiteral("📥 Все"));
+    auto *addPlaylistBtn = new QPushButton(QStringLiteral("➕ В плейлист"));
     connect(dlSel, &QPushButton::clicked, this, &MainWindow::onDownloadSelected);
     connect(streamBtn, &QPushButton::clicked, this, &MainWindow::onStreamSelected);
     connect(dlAll, &QPushButton::clicked, this, &MainWindow::onDownloadAll);
+    connect(addPlaylistBtn, &QPushButton::clicked, this, &MainWindow::onAddToPlaylist);
     btnRow->addWidget(dlSel);
     btnRow->addWidget(streamBtn);
     btnRow->addWidget(dlAll);
+    btnRow->addWidget(addPlaylistBtn);
     btnRow->addStretch();
 
     searchLay->addLayout(top);
@@ -120,7 +123,16 @@ void MainWindow::setupUi() {
         if (f.isVideo && !ensureMpv(true)) {
             return;
         }
-        m_player.playFile(f.path, f.displayName, f.isVideo);
+        m_player.stop();
+        m_player.clearPlaylist();
+        PlaylistItem pi;
+        pi.pathOrUrl = f.path;
+        pi.title = f.displayName;
+        pi.subtitle = f.isVideo ? QStringLiteral("Видео") : QStringLiteral("Локальный файл");
+        pi.isVideo = f.isVideo;
+        pi.isUrl = false;
+        m_player.addToPlaylist(pi);
+        m_player.playNext();
     });
     libLay->addLayout(libTop);
     libLay->addWidget(m_libraryList, 1);
@@ -147,14 +159,23 @@ void MainWindow::setupUi() {
     auto *pbTop = new QHBoxLayout();
     auto *playBtn = new QPushButton(QStringLiteral("▶"));
     auto *stopBtn = new QPushButton(QStringLiteral("⏹"));
+    auto *prevBtn = new QPushButton(QStringLiteral("⏮"));
+    auto *nextBtn = new QPushButton(QStringLiteral("⏭"));
+    m_loopBtn = new QPushButton(QStringLiteral("🔁"));
     connect(playBtn, &QPushButton::clicked, this, &MainWindow::onPlayPause);
     connect(stopBtn, &QPushButton::clicked, this, &MainWindow::onStopPlayer);
+    connect(prevBtn, &QPushButton::clicked, this, &MainWindow::onPlayPrev);
+    connect(nextBtn, &QPushButton::clicked, this, &MainWindow::onPlayNext);
+    connect(m_loopBtn, &QPushButton::clicked, this, &MainWindow::onLoopMode);
     m_playerTitle = new QLabel(QStringLiteral("—"));
     m_playerSubtitle = new QLabel;
     m_seekSlider = new QSlider(Qt::Horizontal);
     m_seekSlider->setRange(0, 0);
     pbTop->addWidget(playBtn);
     pbTop->addWidget(stopBtn);
+    pbTop->addWidget(prevBtn);
+    pbTop->addWidget(nextBtn);
+    pbTop->addWidget(m_loopBtn);
     pbTop->addWidget(m_playerTitle, 1);
     pbLay->addLayout(pbTop);
     pbLay->addWidget(m_playerSubtitle);
@@ -331,7 +352,6 @@ void MainWindow::onSearch() {
 }
 
 void MainWindow::onBatchSearch() {
-    // Спрашиваем у пользователя список треков в многострочном диалоге.
     QDialog dlg(this);
     dlg.setWindowTitle(QStringLiteral("📋 Пакетный поиск"));
     dlg.resize(560, 420);
@@ -506,6 +526,39 @@ void MainWindow::onStreamSelected() {
     }
 }
 
+void MainWindow::onAddToPlaylist() {
+    const auto items = m_resultsList->selectedItems();
+    if (items.isEmpty() && m_resultsList->currentRow() >= 0) {
+        const int row = m_resultsList->currentRow();
+        if (row >= 0 && row < m_tracks.size()) {
+            const auto &t = m_tracks[row];
+            PlaylistItem pi;
+            pi.pathOrUrl = t.streamUrl;
+            pi.title = t.artist + QStringLiteral(" — ") + t.title;
+            pi.subtitle = QStringLiteral("Стрим ") + m_sourceCombo->currentText();
+            pi.isVideo = false;
+            pi.isUrl = true;
+            m_player.addToPlaylist(pi);
+            onLog(QStringLiteral("➕ %1 — %2 добавлен в плейлист").arg(t.artist, t.title));
+        }
+    } else {
+        for (auto *item : items) {
+            const int row = m_resultsList->row(item);
+            if (row >= 0 && row < m_tracks.size()) {
+                const auto &t = m_tracks[row];
+                PlaylistItem pi;
+                pi.pathOrUrl = t.streamUrl;
+                pi.title = t.artist + QStringLiteral(" — ") + t.title;
+                pi.subtitle = QStringLiteral("Стрим ") + m_sourceCombo->currentText();
+                pi.isVideo = false;
+                pi.isUrl = true;
+                m_player.addToPlaylist(pi);
+                onLog(QStringLiteral("➕ %1 — %2 добавлен в плейлист").arg(t.artist, t.title));
+            }
+        }
+    }
+}
+
 void MainWindow::startStream(const Track &track) {
     if (currentSource() == DownloadSource::YtDlp && !ensureYtDlp()) {
         return;
@@ -563,4 +616,29 @@ void MainWindow::onPlayPause() {
 
 void MainWindow::onStopPlayer() {
     m_player.stop();
+}
+
+void MainWindow::onLoopMode() {
+    switch (m_player.loopMode()) {
+    case LoopMode::NoRepeat:
+        m_player.setLoopMode(LoopMode::RepeatAll);
+        m_loopBtn->setText(QStringLiteral("🔁 Все"));
+        break;
+    case LoopMode::RepeatAll:
+        m_player.setLoopMode(LoopMode::RepeatOne);
+        m_loopBtn->setText(QStringLiteral("🔂 Один"));
+        break;
+    case LoopMode::RepeatOne:
+        m_player.setLoopMode(LoopMode::NoRepeat);
+        m_loopBtn->setText(QStringLiteral("🔁"));
+        break;
+    }
+}
+
+void MainWindow::onPlayNext() {
+    m_player.playNext();
+}
+
+void MainWindow::onPlayPrev() {
+    m_player.playPrev();
 }

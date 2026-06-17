@@ -1,6 +1,7 @@
 package net.mp3party.downloader
 
 import android.os.Bundle
+import android.widget.ImageButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import net.mp3party.downloader.databinding.ActivityPlayerBinding
@@ -33,8 +34,25 @@ class PlayerActivity : AppCompatActivity() {
         binding.fullTitle.text = title.ifEmpty { PlaybackManager.currentTitle }
         binding.backButton.setOnClickListener { finish() }
 
+        binding.loopButton.setOnClickListener {
+            PlaybackManager.advanceLoopMode()
+            updateLoopButton(binding.loopButton)
+        }
+        binding.prevButton.setOnClickListener {
+            PlaybackManager.playPrev()
+        }
+        binding.nextButton.setOnClickListener {
+            PlaybackManager.playNext()
+        }
+
         val player = PlaybackManager.getPlayer(this)
         binding.playerView.player = player
+
+        updateLoopButton(binding.loopButton)
+    }
+
+    private fun updateLoopButton(btn: ImageButton) {
+        btn.alpha = if (PlaybackManager.loopMode == LoopMode.NoRepeat) 0.4f else 1.0f
     }
 
     override fun onDestroy() {

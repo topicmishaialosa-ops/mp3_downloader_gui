@@ -7,7 +7,7 @@ mod player;
 
 use eframe::egui::{self, Color32, Frame, Margin, Rounding, Stroke, Vec2};
 use library::{list_downloads, LocalMedia};
-use player::{open_folder_in_file_manager, AudioPlayer};
+use player::{open_folder_in_file_manager, AudioPlayer, LoopMode, PlaylistItem};
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -1196,11 +1196,29 @@ impl LinkParserApp {
                 if ui.add(theme.neutral_button("⏹")).clicked() {
                     self.player.stop();
                 }
+                if ui.add(theme.neutral_button("⏮")).clicked() {
+                    self.player.play_prev();
+                }
+                if ui.add(theme.neutral_button("⏭")).clicked() {
+                    self.player.play_next();
+                }
                 ui.vertical(|ui| {
+                    let playlist_info = if self.player.playlist.len() > 1 {
+                        format!(
+                            "  [{}/{}]",
+                            self.player.playlist_index + 1,
+                            self.player.playlist.len()
+                        )
+                    } else {
+                        String::new()
+                    };
                     ui.label(
-                        egui::RichText::new(&self.player.state.title)
-                            .strong()
-                            .color(theme.text_primary),
+                        egui::RichText::new(format!(
+                            "{}{}",
+                            &self.player.state.title, playlist_info
+                        ))
+                        .strong()
+                        .color(theme.text_primary),
                     );
                     ui.label(
                         egui::RichText::new(&self.player.state.subtitle)
@@ -1208,6 +1226,21 @@ impl LinkParserApp {
                             .color(theme.text_muted),
                     );
                 });
+                let loop_label = match self.player.loop_mode {
+                    LoopMode::NoRepeat => "🔁",
+                    LoopMode::RepeatAll => "🔁",
+                    LoopMode::RepeatOne => "🔂",
+                };
+                let loop_active = self.player.loop_mode != LoopMode::NoRepeat;
+                let loop_btn = if loop_active {
+                    theme.primary_button(loop_label)
+                } else {
+                    theme.neutral_button(loop_label)
+                };
+                let loop_resp = ui.add(loop_btn);
+                if loop_resp.on_hover_text(self.player.loop_mode.label()).clicked() {
+                    self.player.set_loop_mode(self.player.loop_mode.next());
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("✕").clicked() {
                         self.player.stop();
@@ -1272,10 +1305,7 @@ impl LinkParserApp {
             egui::ScrollArea::vertical()
                 .max_height(ui.available_height())
                 .show(ui, |ui| {
-                    let mut play_path: Option<PathBuf> = None;
-                    let mut play_title = String::new();
-                    let mut play_video = false;
-                    for f in &self.library_files {
+                        for f in &self.library_files {
                         ui.horizontal(|ui| {
                             let icon = if f.is_video { "🎬" } else { "🎵" };
                             ui.label(icon);
@@ -1292,28 +1322,32 @@ impl LinkParserApp {
                                 );
                             });
                             if ui.add(theme.primary_button("▶")).clicked() {
-                                play_path = Some(f.path.clone());
-                                play_title = f.display_name.clone();
-                                play_video = f.is_video;
+                                self.player.stop();
+                                let item = PlaylistItem {
+                                    path_or_url: f.path.to_string_lossy().to_string(),
+                                    title: f.display_name.clone(),
+                                    subtitle: if f.is_video { "Видео".into() } else { "Локальный файл".into() },
+                                    is_video: f.is_video,
+                                    is_url: false,
+                                };
+                                self.player.playlist.clear();
+                                self.player.playlist.push_back(item);
+                                self.player.playlist_index = 0;
+                                self.player.play_current();
+                            }
+                            if ui.add(theme.neutral_button("➕")).on_hover_text("В плейлист").clicked() {
+                                let item = PlaylistItem {
+                                    path_or_url: f.path.to_string_lossy().to_string(),
+                                    title: f.display_name.clone(),
+                                    subtitle: if f.is_video { "Видео".into() } else { "Локальный файл".into() },
+                                    is_video: f.is_video,
+                                    is_url: false,
+                                };
+                                self.player.add_to_playlist(item);
+                                self.status = format!("➕ {} добавлен в плейлист", f.display_name);
                             }
                         });
                         ui.separator();
-                    }
-                    if let Some(path) = play_path {
-                        let _ = if play_video {
-                            if Self::offer_mpv_ui(true) {
-                                self.player.play_url(
-                                    path.to_str().unwrap_or(""),
-                                    &play_title,
-                                    "Видео",
-                                    true,
-                                )
-                            } else {
-                                Ok(())
-                            }
-                        } else {
-                            self.player.play_file(&path, &play_title, false)
-                        };
                     }
                 });
         });
@@ -3472,6 +3506,26 @@ impl LinkParserApp {
                                             .clicked()
                                         {
                                             to_stream = Some(*i);
+                                        }
+                                        if ui
+                                            .add(
+                                                theme
+                                                    .neutral_button("➕")
+                                                    .min_size(Vec2::new(36.0, 24.0)),
+                                            )
+                                            .on_hover_text("Добавить в плейлист")
+                                            .clicked()
+                                        {
+                                            let track = &self.tracks[*i];
+                                            let item = PlaylistItem {
+                                                path_or_url: track.url.clone(),
+                                                title: format!("{} — {}", track.artist, track.title),
+                                                subtitle: format!("Стрим {}", self.download_source.label()),
+                                                is_video: false,
+                                                is_url: true,
+                                            };
+                                            self.player.add_to_playlist(item);
+                                            self.status = format!("➕ {} добавлен в плейлист", track.title);
                                         }
                                     });
 

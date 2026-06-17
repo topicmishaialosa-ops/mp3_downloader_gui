@@ -1,3 +1,4 @@
+use std::collections::VecDeque;
 use std::fs;
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
@@ -8,6 +9,40 @@ use std::time::Duration;
 use regex::Regex;
 use rodio::{Decoder, OutputStream, Sink, Source};
 use std::sync::LazyLock;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoopMode {
+    NoRepeat,
+    RepeatAll,
+    RepeatOne,
+}
+
+impl LoopMode {
+    pub fn next(self) -> Self {
+        match self {
+            LoopMode::NoRepeat => LoopMode::RepeatAll,
+            LoopMode::RepeatAll => LoopMode::RepeatOne,
+            LoopMode::RepeatOne => LoopMode::NoRepeat,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LoopMode::NoRepeat => "🔁 Нет",
+            LoopMode::RepeatAll => "🔁 Все",
+            LoopMode::RepeatOne => "🔂 Один",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct PlaylistItem {
+    pub path_or_url: String,
+    pub title: String,
+    pub subtitle: String,
+    pub is_video: bool,
+    pub is_url: bool,
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct PlayerState {
@@ -26,6 +61,9 @@ pub struct AudioPlayer {
     mpv_child: Arc<Mutex<Option<Child>>>,
     pub state: PlayerState,
     mode: PlayMode,
+    pub loop_mode: LoopMode,
+    pub playlist: VecDeque<PlaylistItem>,
+    pub playlist_index: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -43,6 +81,9 @@ impl Default for AudioPlayer {
             mpv_child: Arc::new(Mutex::new(None)),
             state: PlayerState::default(),
             mode: PlayMode::None,
+            loop_mode: LoopMode::NoRepeat,
+            playlist: VecDeque::new(),
+            playlist_index: 0,
         }
     }
 }
@@ -58,6 +99,7 @@ impl AudioPlayer {
         }
         self.mode = PlayMode::None;
         self.state = PlayerState::default();
+        self.playlist.clear();
     }
 
     pub fn toggle_pause(&mut self) {
@@ -89,7 +131,6 @@ impl AudioPlayer {
                 self.state.position_secs = s;
             }
             PlayMode::Rodio => {
-                // rodio не поддерживает seek — перезапуск через mpv если есть
                 self.state.position_secs = s;
             }
             PlayMode::None => {}
@@ -97,13 +138,27 @@ impl AudioPlayer {
     }
 
     pub fn tick(&mut self) {
-        if self.mode == PlayMode::Rodio {
-            if let Some(sink) = &self.sink {
-                self.state.position_secs = sink.get_pos().as_secs_f64();
-                if sink.empty() && self.state.is_playing {
-                    self.state.is_playing = false;
+        match self.mode {
+            PlayMode::Rodio => {
+                if let Some(sink) = &self.sink {
+                    self.state.position_secs = sink.get_pos().as_secs_f64();
+                    if sink.empty() && self.state.is_playing {
+                        self.state.is_playing = false;
+                        self.play_next();
+                    }
                 }
             }
+            PlayMode::External => {
+                let finished = {
+                    let mut guard = self.mpv_child.lock().unwrap();
+                    guard.as_mut().and_then(|c| c.try_wait().ok()).flatten().is_some()
+                };
+                if finished {
+                    self.state.is_playing = false;
+                    self.play_next();
+                }
+            }
+            PlayMode::None => {}
         }
     }
 
@@ -152,7 +207,6 @@ impl AudioPlayer {
                     self.state.subtitle = subtitle.to_string();
                 });
         }
-        // fallback: скачать во временный файл и rodio
         let tmp = std::env::temp_dir().join(format!(
             "mp3party_stream_{}.mp3",
             std::time::SystemTime::now()
@@ -181,6 +235,77 @@ impl AudioPlayer {
         self.play_file(&tmp, title, false)?;
         self.state.subtitle = subtitle.to_string();
         Ok(())
+    }
+
+    pub fn add_to_playlist(&mut self, item: PlaylistItem) {
+        self.playlist.push_back(item);
+    }
+
+    pub fn remove_from_playlist(&mut self, index: usize) {
+        if index < self.playlist.len() {
+            self.playlist.remove(index);
+        }
+    }
+
+    pub fn clear_playlist(&mut self) {
+        self.playlist.clear();
+    }
+
+    pub fn set_loop_mode(&mut self, mode: LoopMode) {
+        self.loop_mode = mode;
+    }
+
+    pub fn play_next(&mut self) {
+        if self.playlist.is_empty() {
+            return;
+        }
+        match self.loop_mode {
+            LoopMode::NoRepeat => {
+                if self.playlist_index + 1 >= self.playlist.len() {
+                    self.stop();
+                    return;
+                }
+                self.playlist_index += 1;
+            }
+            LoopMode::RepeatAll => {
+                self.playlist_index = (self.playlist_index + 1) % self.playlist.len();
+            }
+            LoopMode::RepeatOne => {
+                if self.playlist_index >= self.playlist.len() {
+                    self.playlist_index = 0;
+                }
+            }
+        }
+        self.play_current();
+    }
+
+    pub fn play_prev(&mut self) {
+        if self.playlist.is_empty() {
+            return;
+        }
+        if self.loop_mode == LoopMode::RepeatAll {
+            if self.playlist_index == 0 {
+                self.playlist_index = self.playlist.len() - 1;
+            } else {
+                self.playlist_index -= 1;
+            }
+        } else {
+            if self.playlist_index > 0 {
+                self.playlist_index -= 1;
+            }
+        }
+        self.play_current();
+    }
+
+    pub fn play_current(&mut self) {
+        let Some(item) = self.playlist.get(self.playlist_index).cloned() else {
+            return;
+        };
+        if item.is_url {
+            let _ = self.play_url(&item.path_or_url, &item.title, &item.subtitle, item.is_video);
+        } else {
+            let _ = self.play_file(Path::new(&item.path_or_url), &item.title, item.is_video);
+        }
     }
 
     fn play_external(&mut self, target: &str, title: &str, is_video: bool) -> Result<(), String> {

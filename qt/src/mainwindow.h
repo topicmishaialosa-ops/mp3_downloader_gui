@@ -38,8 +38,11 @@ private slots:
     void onLog(const QString &line);
     void onPlayPause();
     void onStopPlayer();
+    void onLoopMode();
+    void onPlayNext();
+    void onPlayPrev();
+    void onAddToPlaylist();
 
-    /// Запустить последовательный поиск по списку запросов (batch).
     void runBatchQuery(QVector<BatchQuery> queries, int index);
 
 private:
@@ -63,6 +66,7 @@ private:
     QPlainTextEdit *m_logEdit = nullptr;
     QProgressBar *m_progress = nullptr;
     QPushButton *m_searchBtn = nullptr;
+    QPushButton *m_loopBtn = nullptr;
     QLabel *m_playerTitle = nullptr;
     QLabel *m_playerSubtitle = nullptr;
     QSlider *m_seekSlider = nullptr;

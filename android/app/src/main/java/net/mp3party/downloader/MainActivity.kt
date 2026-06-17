@@ -2,6 +2,7 @@ package net.mp3party.downloader
 
 import android.content.Intent
 import android.os.Bundle
+import android.widget.ImageButton
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -125,6 +126,16 @@ class MainActivity : AppCompatActivity() {
         playerBarBinding.expandButton.setOnClickListener {
             openFullscreenPlayer()
         }
+        playerBarBinding.prevButton.setOnClickListener {
+            PlaybackManager.playPrev()
+        }
+        playerBarBinding.nextButton.setOnClickListener {
+            PlaybackManager.playNext()
+        }
+        playerBarBinding.loopButton.setOnClickListener {
+            PlaybackManager.advanceLoopMode()
+            updateLoopButton(playerBarBinding.loopButton)
+        }
         playerBarBinding.seekSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
                 seekUserDragging = true
@@ -143,6 +154,16 @@ class MainActivity : AppCompatActivity() {
                 }
             },
         )
+    }
+
+    private fun updateLoopButton(btn: ImageButton) {
+        val icon = when (PlaybackManager.loopMode) {
+            LoopMode.NoRepeat -> R.drawable.ic_expand
+            LoopMode.RepeatAll -> R.drawable.ic_expand
+            LoopMode.RepeatOne -> R.drawable.ic_expand
+        }
+        btn.setImageResource(icon)
+        btn.alpha = if (PlaybackManager.loopMode == LoopMode.NoRepeat) 0.4f else 1.0f
     }
 
     private fun startProgressUpdates() {
@@ -180,7 +201,6 @@ class MainActivity : AppCompatActivity() {
                 slider.value = posF
             }
         } catch (_: IllegalStateException) {
-            // длительность ещё неизвестна или слайдер в переходном состоянии
         }
     }
 
@@ -214,6 +234,7 @@ class MainActivity : AppCompatActivity() {
         }
         playerBarBinding.expandButton.isVisible = state.isVideo
         playerBarBinding.seekBlock.isVisible = !state.isVideo
+        updateLoopButton(playerBarBinding.loopButton)
     }
 
     private fun animatePlayPauseIcon(button: android.widget.ImageButton, toPause: Boolean) {
@@ -237,7 +258,6 @@ class MainActivity : AppCompatActivity() {
         if (text.isNotEmpty()) binding.loadingText.text = text
     }
 
-    /** Запросить загрузку yt-dlp (Android-библиотека), если ещё не готов. */
     suspend fun ensureYtDlp(): Boolean {
         if (YtDlpHelper.isReady) return true
         return suspendCancellableCoroutine { cont ->

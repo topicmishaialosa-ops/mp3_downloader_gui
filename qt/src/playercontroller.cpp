@@ -25,6 +25,10 @@ PlayerController::PlayerController(QObject *parent) : QObject(parent) {
     connect(m_player, &QMediaPlayer::positionChanged, this, &PlayerController::onPositionChanged);
     connect(m_player, &QMediaPlayer::durationChanged, this, &PlayerController::onDurationChanged);
     connect(m_player, &QMediaPlayer::playbackStateChanged, this, &PlayerController::onPlaybackStateChanged);
+
+    m_tickTimer = new QTimer(this);
+    m_tickTimer->setInterval(400);
+    connect(m_tickTimer, &QTimer::timeout, this, &PlayerController::onTick);
 }
 
 PlayerController::~PlayerController() {
@@ -62,7 +66,6 @@ QString PlayerController::mpvExecutable() const {
 
 QString PlayerController::mpvSocketPath() const {
 #if defined(Q_OS_WIN)
-    // mpv на Windows использует именованный канал, не Unix-socket в %TEMP%
     return QStringLiteral("\\\\.\\pipe\\mp3_downloader_gui_qt_mpv");
 #else
     return QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
@@ -122,7 +125,6 @@ bool PlayerController::startMpv(const QString &url, const QString &title, bool i
          << QStringLiteral("--input-ipc-server=%1").arg(mpvSocketPath());
 
     if (!isVideo) {
-        // Без окна: иначе mpv показывает чёрный экран на аудио-стримах
         args << QStringLiteral("--no-video") << QStringLiteral("--force-window=no");
     }
 
@@ -139,6 +141,7 @@ bool PlayerController::startMpv(const QString &url, const QString &title, bool i
 
     m_usingMpv = true;
     m_video->hide();
+    m_tickTimer->start();
     return true;
 }
 
@@ -167,10 +170,20 @@ void PlayerController::playWithQt(const QUrl &source,
     m_player->setSource(source);
     m_player->play();
     showBar(true);
+    m_tickTimer->start();
 }
 
 void PlayerController::playFile(const QString &path, const QString &title, bool isVideo) {
     stop();
+    m_playlist.clear();
+    PlaylistItem item;
+    item.pathOrUrl = path;
+    item.title = title;
+    item.subtitle = isVideo ? QStringLiteral("Локальное видео") : QStringLiteral("Локальный файл");
+    item.isVideo = isVideo;
+    item.isUrl = false;
+    m_playlist.append(item);
+    m_playlistIndex = 0;
 
     if (isVideo && startMpv(QUrl::fromLocalFile(path).toString(), title, true)) {
         if (m_title) {
@@ -193,6 +206,15 @@ void PlayerController::playUrl(const QString &url,
                                const QString &subtitle,
                                bool isVideo) {
     stop();
+    m_playlist.clear();
+    PlaylistItem item;
+    item.pathOrUrl = url;
+    item.title = title;
+    item.subtitle = subtitle;
+    item.isVideo = isVideo;
+    item.isUrl = true;
+    m_playlist.append(item);
+    m_playlistIndex = 0;
 
     if (m_title) {
         m_title->setText(title);
@@ -201,7 +223,6 @@ void PlayerController::playUrl(const QString &url,
         m_subtitle->setText(subtitle + QStringLiteral(" (mpv)"));
     }
 
-    // Потоки (YouTube, MP3Party, DriveMusic): Qt Multimedia часто даёт чёрный экран на URL
     if (startMpv(url, title, isVideo)) {
         showBar(true);
         return;
@@ -226,12 +247,14 @@ void PlayerController::togglePause() {
 }
 
 void PlayerController::stop() {
+    m_tickTimer->stop();
     stopMpv();
     stopQtPlayer();
     showBar(false);
     if (m_seek) {
         m_seek->setValue(0);
     }
+    m_playlist.clear();
 }
 
 bool PlayerController::hasMedia() const {
@@ -240,6 +263,88 @@ bool PlayerController::hasMedia() const {
     }
     return m_player->playbackState() != QMediaPlayer::StoppedState
            || m_player->mediaStatus() != QMediaPlayer::NoMedia;
+}
+
+void PlayerController::addToPlaylist(const PlaylistItem &item) {
+    m_playlist.append(item);
+    emit playlistChanged();
+}
+
+void PlayerController::clearPlaylist() {
+    m_playlist.clear();
+    emit playlistChanged();
+}
+
+void PlayerController::setLoopMode(LoopMode mode) {
+    m_loopMode = mode;
+}
+
+void PlayerController::playCurrent() {
+    if (m_playlistIndex < 0 || m_playlistIndex >= m_playlist.size()) {
+        stop();
+        return;
+    }
+    const auto &item = m_playlist[m_playlistIndex];
+    if (item.isUrl) {
+        playUrl(item.pathOrUrl, item.title, item.subtitle, item.isVideo);
+    } else {
+        playFile(item.pathOrUrl, item.title, item.isVideo);
+    }
+}
+
+void PlayerController::playNext() {
+    if (m_playlist.isEmpty()) {
+        return;
+    }
+    switch (m_loopMode) {
+    case LoopMode::NoRepeat:
+        if (m_playlistIndex + 1 >= m_playlist.size()) {
+            stop();
+            return;
+        }
+        m_playlistIndex++;
+        break;
+    case LoopMode::RepeatAll:
+        m_playlistIndex = (m_playlistIndex + 1) % m_playlist.size();
+        break;
+    case LoopMode::RepeatOne:
+        if (m_playlistIndex >= m_playlist.size()) {
+            m_playlistIndex = 0;
+        }
+        break;
+    }
+    playCurrent();
+}
+
+void PlayerController::playPrev() {
+    if (m_playlist.isEmpty()) {
+        return;
+    }
+    if (m_loopMode == LoopMode::RepeatAll) {
+        if (m_playlistIndex == 0) {
+            m_playlistIndex = m_playlist.size() - 1;
+        } else {
+            m_playlistIndex--;
+        }
+    } else {
+        if (m_playlistIndex > 0) {
+            m_playlistIndex--;
+        }
+    }
+    playCurrent();
+}
+
+void PlayerController::onTick() {
+    if (m_usingMpv && m_mpv && m_mpv->state() == QProcess::NotRunning) {
+        m_tickTimer->stop();
+        playNext();
+        return;
+    }
+    if (!m_usingMpv && m_player->playbackState() == QMediaPlayer::StoppedState
+        && m_player->mediaStatus() == QMediaPlayer::EndOfMedia) {
+        m_tickTimer->stop();
+        playNext();
+    }
 }
 
 void PlayerController::onMpvFinished(int /*exitCode*/, QProcess::ExitStatus /*status*/) {

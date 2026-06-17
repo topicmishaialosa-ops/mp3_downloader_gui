@@ -12,6 +12,20 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import java.io.File
 
+enum class LoopMode {
+    NoRepeat,
+    RepeatAll,
+    RepeatOne,
+}
+
+data class PlaylistItem(
+    val pathOrUrl: String,
+    val title: String,
+    val subtitle: String = "",
+    val isVideo: Boolean = false,
+    val isUrl: Boolean = false,
+)
+
 object PlaybackManager {
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
@@ -34,6 +48,12 @@ object PlaybackManager {
     var libraryListener: ((PlayerState) -> Unit)? = null
     var errorListener: ((String) -> Unit)? = null
 
+    var loopMode: LoopMode = LoopMode.NoRepeat
+        private set
+    val playlist: MutableList<PlaylistItem> = mutableListOf()
+    var playlistIndex: Int = 0
+        private set
+
     data class PlayerState(
         val title: String,
         val isPlaying: Boolean,
@@ -42,6 +62,9 @@ object PlaybackManager {
         val streamTrackId: String? = null,
         val isStream: Boolean = false,
         val hasActiveMedia: Boolean = false,
+        val loopMode: LoopMode = LoopMode.NoRepeat,
+        val playlistSize: Int = 0,
+        val playlistIndex: Int = 0,
     )
 
     fun getPlayer(context: Context): ExoPlayer {
@@ -76,6 +99,9 @@ object PlaybackManager {
                         if (playbackState == Player.STATE_READY) {
                             lastError = null
                         }
+                        if (playbackState == Player.STATE_ENDED) {
+                            onTrackEnded()
+                        }
                         emit()
                     }
 
@@ -88,44 +114,160 @@ object PlaybackManager {
             }
     }
 
+    private fun onTrackEnded() {
+        when (loopMode) {
+            LoopMode.NoRepeat -> {
+                if (playlistIndex + 1 < playlist.size) {
+                    playlistIndex++
+                    playCurrent()
+                } else {
+                    stop()
+                }
+            }
+            LoopMode.RepeatAll -> {
+                playlistIndex = (playlistIndex + 1) % playlist.size
+                playCurrent()
+            }
+            LoopMode.RepeatOne -> {
+                playCurrent()
+            }
+        }
+    }
+
+    fun playCurrent() {
+        if (playlistIndex < 0 || playlistIndex >= playlist.size) {
+            stop()
+            return
+        }
+        val item = playlist[playlistIndex]
+        if (item.isUrl) {
+            playStream(item)
+        } else {
+            playFile(item)
+        }
+    }
+
+    fun playNext() {
+        if (playlist.isEmpty()) return
+        when (loopMode) {
+            LoopMode.NoRepeat -> {
+                if (playlistIndex + 1 >= playlist.size) {
+                    stop()
+                    return
+                }
+                playlistIndex++
+            }
+            LoopMode.RepeatAll -> {
+                playlistIndex = (playlistIndex + 1) % playlist.size
+            }
+            LoopMode.RepeatOne -> {
+                if (playlistIndex >= playlist.size) playlistIndex = 0
+            }
+        }
+        playCurrent()
+    }
+
+    fun playPrev() {
+        if (playlist.isEmpty()) return
+        if (loopMode == LoopMode.RepeatAll) {
+            playlistIndex = if (playlistIndex == 0) playlist.size - 1 else playlistIndex - 1
+        } else {
+            if (playlistIndex > 0) playlistIndex--
+        }
+        playCurrent()
+    }
+
+    fun addToPlaylist(item: PlaylistItem) {
+        playlist.add(item)
+        emit()
+    }
+
+    fun clearPlaylist() {
+        playlist.clear()
+        emit()
+    }
+
+    fun setLoopMode(mode: LoopMode) {
+        loopMode = mode
+        emit()
+    }
+
+    fun advanceLoopMode() {
+        loopMode = when (loopMode) {
+            LoopMode.NoRepeat -> LoopMode.RepeatAll
+            LoopMode.RepeatAll -> LoopMode.RepeatOne
+            LoopMode.RepeatOne -> LoopMode.NoRepeat
+        }
+        emit()
+    }
+
+    private fun playFile(item: PlaylistItem) {
+        val file = File(item.pathOrUrl)
+        if (!file.exists()) {
+            errorListener?.invoke("Файл не найден: ${file.name}")
+            return
+        }
+        currentFile = file
+        currentStreamTrackId = null
+        isStream = false
+        currentTitle = item.title
+        isVideo = item.isVideo
+        val p = getPlayer(/* context needed but we use app-level */ file)
+        p.stop()
+        p.clearMediaItems()
+        p.setMediaItem(MediaItem.fromUri(uriForFile(p.context, file)))
+        p.prepare()
+        p.play()
+        emit()
+    }
+
+    private fun playStream(item: PlaylistItem) {
+        currentFile = null
+        currentStreamTrackId = item.pathOrUrl
+        isStream = true
+        currentTitle = item.title
+        isVideo = item.isVideo
+        val p = getPlayer(/* context needed */ item.pathOrUrl)
+        p.stop()
+        p.clearMediaItems()
+        p.setMediaItem(MediaItem.fromUri(Uri.parse(item.pathOrUrl)))
+        p.prepare()
+        p.play()
+        emit()
+    }
+
     fun play(context: Context, file: File, title: String, video: Boolean) {
         if (!file.exists()) {
             errorListener?.invoke("Файл не найден: ${file.name}")
             return
         }
-        val sameFile = currentFile?.absolutePath == file.absolutePath && !isStream
-        currentFile = file
-        currentStreamTrackId = null
-        isStream = false
-        currentTitle = title
-        isVideo = video
-        val p = getPlayer(context)
-        if (!sameFile) {
-            p.stop()
-            p.clearMediaItems()
-            p.setMediaItem(MediaItem.fromUri(uriForFile(context, file)))
-            p.prepare()
-        }
-        p.play()
-        emit()
+        playlist.clear()
+        playlistIndex = 0
+        playlist.add(
+            PlaylistItem(
+                pathOrUrl = file.absolutePath,
+                title = title,
+                subtitle = if (video) "Видео" else "Локальный файл",
+                isVideo = video,
+                isUrl = false,
+            )
+        )
+        playCurrent()
     }
 
     fun playStream(context: Context, url: String, title: String, trackId: String, video: Boolean) {
-        val sameStream = isStream && currentStreamTrackId == trackId
-        currentFile = null
-        currentStreamTrackId = trackId
-        isStream = true
-        currentTitle = title
-        isVideo = video
-        val p = getPlayer(context)
-        if (!sameStream) {
-            p.stop()
-            p.clearMediaItems()
-            p.setMediaItem(MediaItem.fromUri(Uri.parse(url)))
-            p.prepare()
-        }
-        p.play()
-        emit()
+        playlist.clear()
+        playlistIndex = 0
+        playlist.add(
+            PlaylistItem(
+                pathOrUrl = url,
+                title = title,
+                subtitle = "Стрим",
+                isVideo = video,
+                isUrl = true,
+            )
+        )
+        playCurrent()
     }
 
     fun togglePlayPause(context: Context) {
@@ -156,6 +298,7 @@ object PlaybackManager {
         isStream = false
         currentTitle = ""
         lastError = null
+        playlist.clear()
         emit()
     }
 
@@ -194,6 +337,9 @@ object PlaybackManager {
             streamTrackId = currentStreamTrackId,
             isStream = isStream,
             hasActiveMedia = hasActiveMedia(),
+            loopMode = loopMode,
+            playlistSize = playlist.size,
+            playlistIndex = playlistIndex,
         )
         listener?.invoke(state)
         libraryListener?.invoke(state)

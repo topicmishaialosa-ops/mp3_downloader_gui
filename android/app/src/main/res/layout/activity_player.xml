@@ -37,6 +37,32 @@
             android:contentDescription="@string/close"
             android:src="@drawable/ic_close" />
 
+        <ImageButton
+            android:id="@+id/prevButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/prev"
+            android:src="@drawable/ic_close"
+            android:rotation="180" />
+
+        <ImageButton
+            android:id="@+id/nextButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/next"
+            android:src="@drawable/ic_close" />
+
+        <ImageButton
+            android:id="@+id/loopButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/loop"
+            android:src="@drawable/ic_expand"
+            android:rotation="90" />
+
         <TextView
             android:id="@+id/fullTitle"
             android:layout_width="0dp"

@@ -21,21 +21,46 @@
             android:layout_height="wrap_content">
 
             <ImageButton
+                android:id="@+id/prevButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/prev"
+                android:src="@drawable/ic_close"
+                android:rotation="180"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <ImageButton
                 android:id="@+id/playPauseButton"
                 android:layout_width="44dp"
                 android:layout_height="44dp"
+                android:layout_marginStart="4dp"
                 android:background="@drawable/bg_icon_circle"
                 android:contentDescription="@string/play"
                 android:src="@drawable/ic_play"
                 app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
+                app:layout_constraintStart_toEndOf="@id/prevButton"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <ImageButton
+                android:id="@+id/nextButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:layout_marginStart="4dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/next"
+                android:src="@drawable/ic_close"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintStart_toEndOf="@id/playPauseButton"
                 app:layout_constraintTop_toTopOf="parent" />
 
             <TextView
                 android:id="@+id/playerTitle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
+                android:layout_marginStart="8dp"
                 android:layout_marginEnd="8dp"
                 android:ellipsize="marquee"
                 android:marqueeRepeatLimit="marquee_forever"
@@ -44,8 +69,8 @@
                 android:textSize="14sp"
                 android:textStyle="bold"
                 app:layout_constraintBottom_toTopOf="@+id/playerSubtitle"
-                app:layout_constraintEnd_toStartOf="@+id/expandButton"
-                app:layout_constraintStart_toEndOf="@id/playPauseButton"
+                app:layout_constraintEnd_toStartOf="@+id/loopButton"
+                app:layout_constraintStart_toEndOf="@id/nextButton"
                 app:layout_constraintTop_toTopOf="parent"
                 app:layout_constraintVertical_chainStyle="packed"
                 tools:text="Исполнитель — Название" />
@@ -54,14 +79,26 @@
                 android:id="@+id/playerSubtitle"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginStart="12dp"
+                android:layout_marginStart="8dp"
                 android:textColor="@color/text_muted"
                 android:textSize="11sp"
                 app:layout_constraintBottom_toBottomOf="parent"
-                app:layout_constraintEnd_toStartOf="@+id/expandButton"
-                app:layout_constraintStart_toEndOf="@id/playPauseButton"
+                app:layout_constraintEnd_toStartOf="@+id/loopButton"
+                app:layout_constraintStart_toEndOf="@id/nextButton"
                 app:layout_constraintTop_toBottomOf="@id/playerTitle"
                 tools:text="Аудио" />
+
+            <ImageButton
+                android:id="@+id/loopButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/loop"
+                android:src="@drawable/ic_expand"
+                android:rotation="90"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toStartOf="@+id/expandButton"
+                app:layout_constraintTop_toTopOf="parent" />
 
             <ImageButton
                 android:id="@+id/expandButton"
