@@ -75,7 +75,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          TAG="v$(grep '^version' Cargo.toml | head -1 | cut -d'\"' -f2)-$(date +%Y%m%d-%H%M)"
+          VERSION=$(grep '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          TAG="v${VERSION}-$(date +%Y%m%d-%H%M)"
           gh release create "$TAG" \
             mp3_downloader_gui-*/* \
             --title "Build $TAG" \
