@@ -1,343 +1,80 @@
-name: Build
+name: Build and Release
 
 on:
   push:
-    branches: [master, main]
-    tags: ["v*"]
-  pull_request:
-    branches: [master, main]
+    branches: [master]
   workflow_dispatch:
-    inputs:
-      create_release:
-        description: "Создать GitHub Release (даже без тега)"
-        required: false
-        default: false
-        type: boolean
-
-concurrency:
-  group: build-${{ github.ref }}
-  cancel-in-progress: true
 
 permissions:
-  contents: read
-
-env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
+  contents: write
 
 jobs:
-  lint:
-    name: Rust fmt + clippy
-    runs-on: ubuntu-24.04
+  build-rust:
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: mp3_downloader_gui-linux-x86_64
+          - target: x86_64-pc-windows-gnu
+            os: ubuntu-latest
+            name: mp3_downloader_gui-windows-x86_64.exe
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: mp3_downloader_gui-macos-x86_64
+
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          targets: ${{ matrix.target }}
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-
-      - name: Install Linux deps (egui + rodio headers)
+      - name: Install deps (Linux)
+        if: contains(matrix.target, 'linux')
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev libglib2.0-dev \
-            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libxkbcommon-dev libssl-dev \
-            libasound2-dev pkg-config
+          sudo apt-get install -y libgtk-3-dev libasound2-dev libudev-dev
 
-      - name: cargo fmt --check
-        run: cargo fmt --all -- --check
-
-      - name: cargo clippy
-        # Сейчас — информационный прогон. После устранения замечаний можно
-        # поднять до `cargo clippy --all-targets --locked -- -D warnings`.
-        run: cargo clippy --all-targets --locked --no-deps --message-format=short || true
-
-  rust-linux:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-
-      - name: Install Linux deps (egui + rodio)
+      - name: Install deps (Windows cross)
+        if: contains(matrix.target, 'windows')
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            libgtk-3-dev libglib2.0-dev \
-            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libxkbcommon-dev libssl-dev \
-            libasound2-dev pkg-config
+          sudo apt-get install -y g++-mingw-w64-x86-64
+          rustup target add x86_64-pc-windows-gnu
 
-      - name: Build Rust (Linux)
-        run: ./scripts/build-linux.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-linux-x86_64
-          path: dist/linux/mp3_downloader_gui
-          if-no-files-found: error
-
-  rust-windows:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-
-      - name: Install cargo-xwin
-        run: cargo install cargo-xwin --locked
-
-      - name: Build Rust (Windows .exe, MSVC via xwin)
-        env:
-          BUILD_WINDOWS_MSVC: "1"
-        run: ./scripts/build-windows-cross.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-windows-x86_64
-          path: dist/windows/mp3_downloader_gui.exe
-          if-no-files-found: error
-
-  rust-macos:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: .
-
-      - name: Build Rust (macOS)
-        run: ./scripts/build-macos.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-macos-arm64
-          path: dist/macos/mp3_downloader_gui
-          if-no-files-found: error
-
-  qt-linux:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Qt6
+      - name: Build
         run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            cmake ninja-build g++ patchelf \
-            qt6-base-dev qt6-multimedia-dev \
-            libxkbcommon-dev
+          cargo build --release --target ${{ matrix.target }}
 
-      - name: Build Qt (Linux portable)
-        run: ./qt/scripts/build-linux.sh
-
-      - uses: actions/upload-artifact@v4
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
-          name: qt-linux-portable
-          path: qt/dist/linux/portable/
-          if-no-files-found: error
+          name: ${{ matrix.name }}
+          path: target/${{ matrix.target }}/release/mp3_downloader_gui${{ contains(matrix.target, 'windows') && '.exe' || '' }}
 
-  qt-windows:
-    runs-on: windows-latest
+  create-release:
+    needs: build-rust
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Qt 6
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.6.3"
-          host: windows
-          target: desktop
-          arch: win64_msvc2019_64
-          modules: qtmultimedia
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
 
-      - name: Build Qt (Windows portable)
-        shell: cmd
-        run: qt\scripts\build-windows.bat
+      - name: List artifacts
+        run: ls -laR
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: qt-windows-portable
-          path: qt/dist/windows/portable/
-          if-no-files-found: error
-
-  qt-macos:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Qt 6
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.6.3"
-          host: mac
-          target: desktop
-          arch: clang_64
-          modules: qtmultimedia
-
-      - name: Build Qt (macOS .app bundle)
-        run: ./qt/scripts/build-macos.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: qt-macos-portable
-          path: qt/dist/macos/portable/
-          if-no-files-found: error
-
-  android:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-
-      - uses: android-actions/setup-android@v3
-
-      - name: Setup Gradle cache
-        uses: gradle/actions/setup-gradle@v4
-
-      - name: Prepare release signing keystore
-        run: |
-          mkdir -p "$HOME/.android"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool -genkeypair -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=MP3 Downloader, OU=CI, O=MP3Party, L=Unknown, ST=Unknown, C=US"
-          fi
-
-      - name: Build APK (Kotlin / Android)
+      - name: Create release
         env:
-          ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
-          GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-home
-        run: ./scripts/build-android.sh
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: android-apk
-          path: dist/android/mp3-downloader-release.apk
-          if-no-files-found: error
-
-  release:
-    needs:
-      - lint
-      - rust-linux
-      - rust-windows
-      - rust-macos
-      - qt-linux
-      - qt-windows
-      - qt-macos
-      - android
-    if: >
-      startsWith(github.ref, 'refs/tags/v') ||
-      (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Package release assets
-        shell: bash
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -eo pipefail
-          mkdir -p release
-
-          ref_name="${GITHUB_REF_NAME:-}"
-          version="${ref_name#v}"
-          cargo_ver="$(grep -m1 '^version[[:space:]]*=' Cargo.toml | sed -E 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/')"
-          if [ -z "$version" ] || [ "$version" = "$ref_name" ]; then
-            version="${cargo_ver:-0.0.0}"
-          fi
-          echo "VERSION=${version}" >> "$GITHUB_ENV"
-
-          artifact_file() {
-            local dir="$1" file="$2"
-            local path="artifacts/${dir}/${file}"
-            if [ ! -f "$path" ]; then
-              echo "Missing artifact file: $path"
-              find artifacts -type f 2>/dev/null || true
-              exit 1
-            fi
-            printf '%s' "$path"
-          }
-
-          artifact_dir() {
-            local dir="$1"
-            local path="artifacts/${dir}"
-            if [ ! -d "$path" ]; then
-              echo "Missing artifact dir: $path"
-              find artifacts -maxdepth 2 -type d 2>/dev/null || true
-              exit 1
-            fi
-            printf '%s' "$path"
-          }
-
-          zip_one() {
-            local zip_path="$1" file_path="$2"
-            zip -j "$zip_path" "$file_path"
-          }
-
-          zip_dir() {
-            local zip_path="$1" dir_path="$2"
-            local abs_zip="${GITHUB_WORKSPACE}/${zip_path}"
-            (cd "$dir_path" && zip -r "$abs_zip" .)
-          }
-
-          # Rust desktop (single binary)
-          zip_one release/mp3_downloader_gui-linux-x86_64.zip \
-            "$(artifact_file rust-linux-x86_64 mp3_downloader_gui)"
-          zip_one release/mp3_downloader_gui-windows-x86_64.zip \
-            "$(artifact_file rust-windows-x86_64 mp3_downloader_gui.exe)"
-          zip_one release/mp3_downloader_gui-macos-arm64.zip \
-            "$(artifact_file rust-macos-arm64 mp3_downloader_gui)"
-
-          # Qt desktop (portable: DLL / .app / libs+plugins)
-          zip_dir release/mp3_downloader_gui_qt-linux-x86_64-portable.zip \
-            "$(artifact_dir qt-linux-portable)"
-          zip_dir release/mp3_downloader_gui_qt-windows-x86_64-portable.zip \
-            "$(artifact_dir qt-windows-portable)"
-          zip_dir release/mp3_downloader_gui_qt-macos-arm64-portable.zip \
-            "$(artifact_dir qt-macos-portable)"
-
-          # Android (Kotlin; qt/scripts/build-android — тот же APK)
-          apk="$(artifact_file android-apk mp3-downloader-release.apk)"
-          cp "$apk" "release/mp3-downloader-${version}.apk"
-          cp "$apk" "release/mp3-downloader-android-${version}.apk"
-
-          ls -lh release/
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('v{0}-build.{1}', env.VERSION, github.run_number) }}
-          name: MP3 Downloader GUI ${{ env.VERSION }}
-          generate_release_notes: true
-          files: release/*
-          fail_on_unmatched_files: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG="v$(grep '^version' Cargo.toml | head -1 | cut -d'\"' -f2)-$(date +%Y%m%d-%H%M)"
+          gh release create "$TAG" \
+            mp3_downloader_gui-*/* \
+            --title "Build $TAG" \
+            --notes "Автоматическая сборка от $(date)" \
+            --generate-notes
