@@ -72,9 +72,6 @@ jobs:
           - os: macos-latest
             name: mp3_downloader_gui_qt-macos-x86_64
             artifact: qt/build/mp3_downloader_gui_qt
-          - os: ubuntu-latest
-            name: mp3_downloader_gui_qt-windows-x86_64.exe
-            artifact: qt/build/mp3_downloader_gui_qt.exe
 
     runs-on: ${{ matrix.os }}
     steps:
@@ -91,23 +88,9 @@ jobs:
         run: |
           brew install qt6 cmake
 
-      - name: Install Qt6 & MinGW (Windows cross)
-        if: runner.os == 'Linux' && contains(matrix.name, 'windows')
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qt6-base-dev qt6-multimedia-dev libqt6multimedia6 libqt6multimediawidgets6 cmake g++ mingw-w64
-          sudo apt-get install -y qt6-base-dev-tools
-
-      - name: Build Qt (Linux/macOS)
-        if: runner.os != 'Windows' && !contains(matrix.name, 'windows')
+      - name: Build Qt
         run: |
           cmake -B qt/build -S qt -DCMAKE_BUILD_TYPE=Release
-          cmake --build qt/build --parallel
-
-      - name: Build Qt (Windows cross)
-        if: runner.os == 'Linux' && contains(matrix.name, 'windows')
-        run: |
-          cmake -B qt/build -S qt -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=qt/cmake/mingw64.cmake
           cmake --build qt/build --parallel
 
       - name: Upload artifact
@@ -135,18 +118,18 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses > /dev/null 2>&1 || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.2.9519653" > /dev/null 2>&1
 
-      - name: Build Android APK (Release)
+      - name: Build Android APK (Debug)
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload artifact
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: mp3_downloader_gui-android-release.apk
-          path: android/app/build/outputs/apk/release/app-release.apk
+          name: mp3_downloader_gui-android.apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
 
   create-release:
     needs: [build-rust, build-qt, build-android]
