@@ -11,6 +11,7 @@ permissions:
 jobs:
   build-rust:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
@@ -43,14 +44,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y g++-mingw-w64-x86-64 mingw-w64-tools
-          echo '[target.x86_64-pc-windows-gnu]' >> ~/.cargo/config.toml
-          echo 'linker = "x86_64-w64-mingw32-gcc"' >> ~/.cargo/config.toml
+          mkdir -p ~/.cargo
+          cat >> ~/.cargo/config.toml << 'EOF'
+          [target.x86_64-pc-windows-gnu]
+          linker = "x86_64-w64-mingw32-gcc"
+          EOF
 
       - name: Build
         run: |
           cargo build --release --target ${{ matrix.target }}
 
       - name: Upload artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.name }}
@@ -65,9 +70,6 @@ jobs:
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
-
-      - name: List artifacts
-        run: ls -laR
 
       - name: Create release
         env:
