@@ -321,7 +321,7 @@ void MainWindow::onSearch() {
     m_tracks.clear();
     const auto src = currentSource();
 
-    QtConcurrent::run([this, query, src]() {
+    (void)QtConcurrent::run([this, query, src]() {
         QString err;
         QVector<Track> tracks;
         switch (src) {
@@ -426,7 +426,7 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
     }
 
     const QString query = q.searchText();
-    QtConcurrent::run([this, queries, index, total, src, query]() {
+    (void)QtConcurrent::run([this, queries, index, total, src, query]() {
         QString err;
         QVector<Track> tracks;
         switch (src) {
@@ -571,7 +571,7 @@ void MainWindow::startStream(const Track &track) {
     const auto fmt = currentYtFormat();
     const QString title = track.artist + QStringLiteral(" — ") + track.title;
 
-    QtConcurrent::run([this, track, src, fmt, title]() {
+    (void)QtConcurrent::run([this, track, src, fmt, title]() {
         QString err;
         QString url;
         bool isVideo = false;

@@ -66,7 +66,7 @@ void DownloadManager::runTask(int index) {
     const Task taskCopy = m_tasks[index];
     const QString folder = m_folder;
 
-    QtConcurrent::run([this, index, taskCopy, folder]() {
+    (void)QtConcurrent::run([this, index, taskCopy, folder]() {
         QString err;
         QString path;
         const Track &track = taskCopy.track;

@@ -9,5 +9,6 @@ struct Track {
     QString artist;
     QString title;
     QString url;
+    QString streamUrl;
     DownloadSource source = DownloadSource::Mp3Party;
 };
