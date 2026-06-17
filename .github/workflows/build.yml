@@ -78,11 +78,12 @@ jobs:
           VERSION=$(grep '^version' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           TAG="v${VERSION}-$(date +%Y%m%d-%H%M)"
           gh release create "$TAG" \
-            --title "Build $TAG" \
+            --title "mp3 downloader gui ${VERSION}" \
             --notes "Автоматическая сборка от $(date)"
           sleep 5
           for dir in mp3_downloader_gui-*/; do
             name="${dir%/}"
             file=$(find "$dir" -type f)
-            gh release upload "$TAG" "$file" --name "$name" --clobber
+            mv "$file" "$dir/$name"
+            gh release upload "$TAG" "$dir/$name" --clobber
           done
