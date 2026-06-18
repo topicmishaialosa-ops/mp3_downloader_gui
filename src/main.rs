@@ -1276,7 +1276,7 @@ impl LinkParserApp {
                     egui::Slider::new(&mut self.player.volume, 0.0..=1.0)
                         .clamp_to_range(true)
                         .show_value(false)
-                        .custom_text(vol_label),
+                        .text(vol_label),
                 );
                 if vol_resp.changed() {
                     self.player.set_volume(self.player.volume());
@@ -3090,16 +3090,16 @@ impl eframe::App for LinkParserApp {
         ctx.input(|i| {
             if self.player.state.has_media {
                 // Space = toggle pause
-                if i.key_pressed(egui::Key::Space) && !i.modifiers.any_ctrl() {
+                if i.key_pressed(egui::Key::Space) && !i.modifiers.ctrl {
                     self.player.toggle_pause();
                 }
                 // Left arrow = seek back 5s
-                if i.key_pressed(egui::Key::ArrowLeft) {
+                if i.key_pressed(egui::Key::ArrowLeft) && !i.modifiers.ctrl {
                     let new_pos = (self.player.state.position_secs - 5.0).max(0.0);
                     self.player_seek_request = Some(new_pos);
                 }
                 // Right arrow = seek forward 5s
-                if i.key_pressed(egui::Key::ArrowRight) {
+                if i.key_pressed(egui::Key::ArrowRight) && !i.modifiers.ctrl {
                     let new_pos = self.player.state.position_secs + 5.0;
                     self.player_seek_request = Some(new_pos);
                 }
@@ -3123,7 +3123,7 @@ impl eframe::App for LinkParserApp {
                 self.player.play_prev();
             }
             // S = toggle shuffle (when not in text field)
-            if i.key_pressed(egui::Key::S) && !i.modifiers.any_ctrl() && !i.modifiers.any_alt() {
+            if i.key_pressed(egui::Key::S) && !i.modifiers.ctrl && !i.modifiers.alt {
                 self.player.toggle_shuffle();
             }
         });
