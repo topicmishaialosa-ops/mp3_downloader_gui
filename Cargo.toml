@@ -1,6 +1,6 @@
 [package]
 name = "mp3_downloader_gui"
-version = "1.4.15"
+version = "1.14.6"
 edition = "2021"
 
 [dependencies]
@@ -11,3 +11,4 @@ regex = "1"
 urlencoding = "2.1.3"
 rfd = "0.15"
 rodio = { version = "0.19", default-features = false, features = ["mp3", "vorbis", "flac", "wav"] }
+rand = "0.8"

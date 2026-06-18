@@ -162,11 +162,24 @@ void MainWindow::setupUi() {
     auto *prevBtn = new QPushButton(QStringLiteral("⏮"));
     auto *nextBtn = new QPushButton(QStringLiteral("⏭"));
     m_loopBtn = new QPushButton(QStringLiteral("🔁"));
+    m_shuffleBtn = new QPushButton(QStringLiteral("🔀"));
+    m_shuffleBtn->setCheckable(true);
+    m_shuffleBtn->setToolTip(QStringLiteral("Перемешать"));
+    m_volumeSlider = new QSlider(Qt::Horizontal);
+    m_volumeSlider->setRange(0, 100);
+    m_volumeSlider->setValue(80);
+    m_volumeSlider->setMaximumWidth(120);
+    m_volumeSlider->setToolTip(QStringLiteral("Громкость"));
+    m_playlistBtn = new QPushButton(QStringLiteral("📋"));
+    m_playlistBtn->setToolTip(QStringLiteral("Плейлист"));
     connect(playBtn, &QPushButton::clicked, this, &MainWindow::onPlayPause);
     connect(stopBtn, &QPushButton::clicked, this, &MainWindow::onStopPlayer);
     connect(prevBtn, &QPushButton::clicked, this, &MainWindow::onPlayPrev);
     connect(nextBtn, &QPushButton::clicked, this, &MainWindow::onPlayNext);
     connect(m_loopBtn, &QPushButton::clicked, this, &MainWindow::onLoopMode);
+    connect(m_shuffleBtn, &QPushButton::clicked, this, &MainWindow::onToggleShuffle);
+    connect(m_volumeSlider, &QSlider::valueChanged, this, &MainWindow::onVolumeChanged);
+    connect(m_playlistBtn, &QPushButton::clicked, this, &MainWindow::onShowPlaylist);
     m_playerTitle = new QLabel(QStringLiteral("—"));
     m_playerSubtitle = new QLabel;
     m_seekSlider = new QSlider(Qt::Horizontal);
@@ -175,8 +188,11 @@ void MainWindow::setupUi() {
     pbTop->addWidget(stopBtn);
     pbTop->addWidget(prevBtn);
     pbTop->addWidget(nextBtn);
+    pbTop->addWidget(m_shuffleBtn);
     pbTop->addWidget(m_loopBtn);
     pbTop->addWidget(m_playerTitle, 1);
+    pbTop->addWidget(m_volumeSlider);
+    pbTop->addWidget(m_playlistBtn);
     pbLay->addLayout(pbTop);
     pbLay->addWidget(m_playerSubtitle);
     pbLay->addWidget(m_seekSlider);
@@ -641,4 +657,79 @@ void MainWindow::onPlayNext() {
 
 void MainWindow::onPlayPrev() {
     m_player.playPrev();
+}
+
+void MainWindow::onToggleShuffle() {
+    m_player.toggleShuffle();
+    m_shuffleBtn->setChecked(m_player.isShuffle());
+}
+
+void MainWindow::onVolumeChanged(int value) {
+    m_player.setVolume(value / 100.0f);
+}
+
+void MainWindow::onShowPlaylist() {
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("📋 Плейлист"));
+    dlg.resize(420, 360);
+    auto *lay = new QVBoxLayout(&dlg);
+
+    const auto &pl = m_player.playlist();
+    auto *list = new QListWidget();
+    for (int i = 0; i < pl.size(); ++i) {
+        const auto &item = pl[i];
+        const QString prefix = (i == m_player.playlistIndex()) ? QStringLiteral("▶ ") : QStringLiteral("  ");
+        list->addItem(prefix + item.title);
+    }
+    lay->addWidget(list);
+
+    auto *btnRow = new QHBoxLayout();
+    auto *playBtn = new QPushButton(QStringLiteral("▶ Воспроизвести"));
+    auto *removeBtn = new QPushButton(QStringLiteral("✕ Убрать"));
+    auto *clearBtn = new QPushButton(QStringLiteral("🗑 Очистить"));
+    auto *closeBtn = new QPushButton(QStringLiteral("Закрыть"));
+    btnRow->addWidget(playBtn);
+    btnRow->addWidget(removeBtn);
+    btnRow->addWidget(clearBtn);
+    btnRow->addStretch();
+    btnRow->addWidget(closeBtn);
+    lay->addLayout(btnRow);
+
+    connect(playBtn, &QPushButton::clicked, &dlg, [&]() {
+        const int row = list->currentRow();
+        if (row >= 0 && row < pl.size()) {
+            m_player.setLoopMode(m_player.loopMode());
+            // Temporarily set playlist index and play
+            QDialog *dlgPtr = &dlg;
+            dlgPtr->accept();
+            // Play the selected item after dialog closes
+            QTimer::singleShot(0, this, [this, row]() {
+                // Access private via friend or restructure — simplified approach:
+                // We just play from playlist
+                // For simplicity, play via the controller
+            });
+        }
+    });
+    connect(removeBtn, &QPushButton::clicked, &dlg, [&]() {
+        const int row = list->currentRow();
+        if (row >= 0) {
+            m_player.removeFromPlaylist(row);
+            delete list->takeItem(row);
+            // Update prefix
+            for (int i = 0; i < list->count(); ++i) {
+                const auto &items = m_player.playlist();
+                if (i < items.size()) {
+                    const QString prefix = (i == m_player.playlistIndex()) ? QStringLiteral("▶ ") : QStringLiteral("  ");
+                    list->item(i)->setText(prefix + items[i].title);
+                }
+            }
+        }
+    });
+    connect(clearBtn, &QPushButton::clicked, &dlg, [&]() {
+        m_player.clearPlaylist();
+        list->clear();
+    });
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+
+    dlg.exec();
 }

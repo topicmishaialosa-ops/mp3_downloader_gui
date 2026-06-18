@@ -45,11 +45,17 @@ public:
     void playNext();
     void playPrev();
     void addToPlaylist(const PlaylistItem &item);
+    void removeFromPlaylist(int index);
     void clearPlaylist();
     void setLoopMode(LoopMode mode);
     LoopMode loopMode() const { return m_loopMode; }
     const QVector<PlaylistItem> &playlist() const { return m_playlist; }
     int playlistIndex() const { return m_playlistIndex; }
+
+    void toggleShuffle();
+    bool isShuffle() const { return m_shuffle; }
+    void setVolume(float vol);
+    float volume() const { return m_volume; }
 
 signals:
     void playlistChanged();
@@ -73,6 +79,7 @@ private:
     void sendMpvCommand(const QStringList &args) const;
     void playWithQt(const QUrl &source, const QString &title, const QString &subtitle, bool allowVideo);
     void playCurrent();
+    int nextShuffleIndex() const;
 
     QMediaPlayer *m_player = nullptr;
     QAudioOutput *m_audio = nullptr;
@@ -87,6 +94,9 @@ private:
 
     QTimer *m_tickTimer = nullptr;
     LoopMode m_loopMode = LoopMode::NoRepeat;
+    bool m_shuffle = false;
+    float m_volume = 0.8f;
     QVector<PlaylistItem> m_playlist;
     int m_playlistIndex = 0;
+    QVector<int> m_shuffleHistory;
 };

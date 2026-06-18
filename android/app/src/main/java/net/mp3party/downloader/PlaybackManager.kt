@@ -51,9 +51,14 @@ object PlaybackManager {
 
     var loopMode: LoopMode = LoopMode.NoRepeat
         private set
+    var shuffle: Boolean = false
+        private set
+    var volume: Float = 0.8f
+        private set
     val playlist: MutableList<PlaylistItem> = mutableListOf()
     var playlistIndex: Int = 0
         private set
+    private val shuffleHistory = mutableListOf<Int>()
 
     data class PlayerState(
         val title: String,
@@ -64,6 +69,8 @@ object PlaybackManager {
         val isStream: Boolean = false,
         val hasActiveMedia: Boolean = false,
         val loopMode: LoopMode = LoopMode.NoRepeat,
+        val shuffle: Boolean = false,
+        val volume: Float = 0.8f,
         val playlistSize: Int = 0,
         val playlistIndex: Int = 0,
     )
@@ -118,7 +125,11 @@ object PlaybackManager {
     private fun onTrackEnded() {
         when (loopMode) {
             LoopMode.NoRepeat -> {
-                if (playlistIndex + 1 < playlist.size) {
+                if (shuffle) {
+                    playlistIndex = nextShuffleIndex()
+                    shuffleHistory.add(playlistIndex)
+                    playCurrent()
+                } else if (playlistIndex + 1 < playlist.size) {
                     playlistIndex++
                     playCurrent()
                 } else {
@@ -126,13 +137,28 @@ object PlaybackManager {
                 }
             }
             LoopMode.RepeatAll -> {
-                playlistIndex = (playlistIndex + 1) % playlist.size
+                if (shuffle) {
+                    playlistIndex = nextShuffleIndex()
+                } else {
+                    playlistIndex = (playlistIndex + 1) % playlist.size
+                }
+                shuffleHistory.add(playlistIndex)
                 playCurrent()
             }
             LoopMode.RepeatOne -> {
                 playCurrent()
             }
         }
+    }
+
+    private fun nextShuffleIndex(): Int {
+        if (playlist.size <= 1) return 0
+        if (playlist.size == 2) return if (playlistIndex == 0) 1 else 0
+        var idx: Int
+        do {
+            idx = (0 until playlist.size).random()
+        } while (idx == playlistIndex)
+        return idx
     }
 
     fun playCurrent() {
@@ -150,19 +176,24 @@ object PlaybackManager {
 
     fun playNext() {
         if (playlist.isEmpty()) return
-        when (loopMode) {
-            LoopMode.NoRepeat -> {
-                if (playlistIndex + 1 >= playlist.size) {
-                    stop()
-                    return
+        if (shuffle) {
+            playlistIndex = nextShuffleIndex()
+            shuffleHistory.add(playlistIndex)
+        } else {
+            when (loopMode) {
+                LoopMode.NoRepeat -> {
+                    if (playlistIndex + 1 >= playlist.size) {
+                        stop()
+                        return
+                    }
+                    playlistIndex++
                 }
-                playlistIndex++
-            }
-            LoopMode.RepeatAll -> {
-                playlistIndex = (playlistIndex + 1) % playlist.size
-            }
-            LoopMode.RepeatOne -> {
-                if (playlistIndex >= playlist.size) playlistIndex = 0
+                LoopMode.RepeatAll -> {
+                    playlistIndex = (playlistIndex + 1) % playlist.size
+                }
+                LoopMode.RepeatOne -> {
+                    // Replay current
+                }
             }
         }
         playCurrent()
@@ -170,10 +201,15 @@ object PlaybackManager {
 
     fun playPrev() {
         if (playlist.isEmpty()) return
-        if (loopMode == LoopMode.RepeatAll) {
-            playlistIndex = if (playlistIndex == 0) playlist.size - 1 else playlistIndex - 1
-        } else {
-            if (playlistIndex > 0) playlistIndex--
+        if (shuffle && shuffleHistory.size > 1) {
+            shuffleHistory.removeAt(shuffleHistory.size - 1)
+            playlistIndex = shuffleHistory.last()
+        } else if (!shuffle) {
+            if (loopMode == LoopMode.RepeatAll) {
+                playlistIndex = if (playlistIndex == 0) playlist.size - 1 else playlistIndex - 1
+            } else {
+                if (playlistIndex > 0) playlistIndex--
+            }
         }
         playCurrent()
     }
@@ -183,8 +219,24 @@ object PlaybackManager {
         emit()
     }
 
+    fun removeFromPlaylist(index: Int) {
+        if (index < 0 || index >= playlist.size) return
+        playlist.removeAt(index)
+        if (playlist.isEmpty()) {
+            playlistIndex = 0
+            shuffleHistory.clear()
+        } else if (index < playlistIndex) {
+            playlistIndex--
+        } else if (index == playlistIndex && playlistIndex >= playlist.size) {
+            playlistIndex = playlist.size - 1
+        }
+        emit()
+    }
+
     fun clearPlaylist() {
         playlist.clear()
+        playlistIndex = 0
+        shuffleHistory.clear()
         emit()
     }
 
@@ -199,6 +251,25 @@ object PlaybackManager {
             LoopMode.RepeatAll -> LoopMode.RepeatOne
             LoopMode.RepeatOne -> LoopMode.NoRepeat
         }
+        emit()
+    }
+
+    fun toggleShuffle() {
+        shuffle = !shuffle
+        if (shuffle) {
+            shuffleHistory.clear()
+            if (playlist.isNotEmpty()) {
+                shuffleHistory.add(playlistIndex)
+            }
+        } else {
+            shuffleHistory.clear()
+        }
+        emit()
+    }
+
+    fun setVolume(vol: Float) {
+        volume = vol.coerceIn(0f, 1f)
+        player?.volume = volume
         emit()
     }
 
@@ -302,6 +373,8 @@ object PlaybackManager {
         currentTitle = ""
         lastError = null
         playlist.clear()
+        playlistIndex = 0
+        shuffleHistory.clear()
         emit()
     }
 
@@ -341,6 +414,8 @@ object PlaybackManager {
             isStream = isStream,
             hasActiveMedia = hasActiveMedia(),
             loopMode = loopMode,
+            shuffle = shuffle,
+            volume = volume,
             playlistSize = playlist.size,
             playlistIndex = playlistIndex,
         )

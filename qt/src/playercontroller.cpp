@@ -7,6 +7,7 @@
 #include <QLabel>
 #include <QMediaPlayer>
 #include <QProcess>
+#include <QRandomGenerator>
 #include <QSlider>
 #include <QStandardPaths>
 #include <QUrl>
@@ -270,13 +271,50 @@ void PlayerController::addToPlaylist(const PlaylistItem &item) {
     emit playlistChanged();
 }
 
+void PlayerController::removeFromPlaylist(int index) {
+    if (index < 0 || index >= m_playlist.size()) return;
+    m_playlist.remove(index);
+    if (m_playlist.isEmpty()) {
+        m_playlistIndex = 0;
+        m_shuffleHistory.clear();
+    } else if (index < m_playlistIndex) {
+        m_playlistIndex--;
+    } else if (index == m_playlistIndex && m_playlistIndex >= m_playlist.size()) {
+        m_playlistIndex = m_playlist.size() - 1;
+    }
+    emit playlistChanged();
+}
+
 void PlayerController::clearPlaylist() {
     m_playlist.clear();
+    m_playlistIndex = 0;
+    m_shuffleHistory.clear();
     emit playlistChanged();
 }
 
 void PlayerController::setLoopMode(LoopMode mode) {
     m_loopMode = mode;
+}
+
+void PlayerController::toggleShuffle() {
+    m_shuffle = !m_shuffle;
+    if (m_shuffle) {
+        m_shuffleHistory.clear();
+        if (!m_playlist.isEmpty()) {
+            m_shuffleHistory.append(m_playlistIndex);
+        }
+    } else {
+        m_shuffleHistory.clear();
+    }
+}
+
+void PlayerController::setVolume(float vol) {
+    m_volume = qBound(0.0f, vol, 1.0f);
+    m_audio->setVolume(m_volume);
+    if (m_usingMpv) {
+        sendMpvCommand({QStringLiteral("set"), QStringLiteral("volume"),
+                        QString::number(static_cast<int>(m_volume * 100))});
+    }
 }
 
 void PlayerController::playCurrent() {
@@ -296,22 +334,25 @@ void PlayerController::playNext() {
     if (m_playlist.isEmpty()) {
         return;
     }
-    switch (m_loopMode) {
-    case LoopMode::NoRepeat:
-        if (m_playlistIndex + 1 >= m_playlist.size()) {
-            stop();
-            return;
+    if (m_shuffle) {
+        m_playlistIndex = nextShuffleIndex();
+        m_shuffleHistory.append(m_playlistIndex);
+    } else {
+        switch (m_loopMode) {
+        case LoopMode::NoRepeat:
+            if (m_playlistIndex + 1 >= m_playlist.size()) {
+                stop();
+                return;
+            }
+            m_playlistIndex++;
+            break;
+        case LoopMode::RepeatAll:
+            m_playlistIndex = (m_playlistIndex + 1) % m_playlist.size();
+            break;
+        case LoopMode::RepeatOne:
+            // Replay current — do nothing
+            break;
         }
-        m_playlistIndex++;
-        break;
-    case LoopMode::RepeatAll:
-        m_playlistIndex = (m_playlistIndex + 1) % m_playlist.size();
-        break;
-    case LoopMode::RepeatOne:
-        if (m_playlistIndex >= m_playlist.size()) {
-            m_playlistIndex = 0;
-        }
-        break;
     }
     playCurrent();
 }
@@ -320,18 +361,29 @@ void PlayerController::playPrev() {
     if (m_playlist.isEmpty()) {
         return;
     }
-    if (m_loopMode == LoopMode::RepeatAll) {
-        if (m_playlistIndex == 0) {
-            m_playlistIndex = m_playlist.size() - 1;
+    if (m_shuffle && m_shuffleHistory.size() > 1) {
+        m_shuffleHistory.removeLast();
+        m_playlistIndex = m_shuffleHistory.last();
+    } else if (!m_shuffle) {
+        if (m_loopMode == LoopMode::RepeatAll) {
+            m_playlistIndex = (m_playlistIndex == 0) ? m_playlist.size() - 1 : m_playlistIndex - 1;
         } else {
-            m_playlistIndex--;
-        }
-    } else {
-        if (m_playlistIndex > 0) {
-            m_playlistIndex--;
+            if (m_playlistIndex > 0) {
+                m_playlistIndex--;
+            }
         }
     }
     playCurrent();
+}
+
+int PlayerController::nextShuffleIndex() const {
+    if (m_playlist.size() <= 1) return 0;
+    if (m_playlist.size() == 2) return (m_playlistIndex == 0) ? 1 : 0;
+    int idx;
+    do {
+        idx = QRandomGenerator::global()->bounded(m_playlist.size());
+    } while (idx == m_playlistIndex);
+    return idx;
 }
 
 void PlayerController::onTick() {

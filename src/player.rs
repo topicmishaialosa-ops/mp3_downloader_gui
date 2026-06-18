@@ -10,6 +10,8 @@ use regex::Regex;
 use rodio::{Decoder, OutputStream, Sink, Source};
 use std::sync::LazyLock;
 
+use rand::Rng;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LoopMode {
     NoRepeat,
@@ -62,8 +64,11 @@ pub struct AudioPlayer {
     pub state: PlayerState,
     mode: PlayMode,
     pub loop_mode: LoopMode,
+    pub shuffle: bool,
+    pub volume: f32,
     pub playlist: VecDeque<PlaylistItem>,
     pub playlist_index: usize,
+    shuffle_history: Vec<usize>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -82,8 +87,11 @@ impl Default for AudioPlayer {
             state: PlayerState::default(),
             mode: PlayMode::None,
             loop_mode: LoopMode::NoRepeat,
+            shuffle: false,
+            volume: 0.8,
             playlist: VecDeque::new(),
             playlist_index: 0,
+            shuffle_history: Vec::new(),
         }
     }
 }
@@ -100,6 +108,8 @@ impl AudioPlayer {
         self.mode = PlayMode::None;
         self.state = PlayerState::default();
         self.playlist.clear();
+        self.playlist_index = 0;
+        self.shuffle_history.clear();
     }
 
     pub fn toggle_pause(&mut self) {
@@ -177,6 +187,7 @@ impl AudioPlayer {
             .map(|d| d.as_secs_f64())
             .unwrap_or(0.0);
         sink.append(source);
+        sink.set_volume(self.volume);
         sink.play();
         self._stream = Some(_stream);
         self.sink = Some(sink);
@@ -244,35 +255,89 @@ impl AudioPlayer {
     pub fn remove_from_playlist(&mut self, index: usize) {
         if index < self.playlist.len() {
             self.playlist.remove(index);
+            if self.playlist.is_empty() {
+                self.playlist_index = 0;
+                self.shuffle_history.clear();
+            } else if index < self.playlist_index {
+                self.playlist_index -= 1;
+            } else if index == self.playlist_index && self.playlist_index >= self.playlist.len() {
+                self.playlist_index = self.playlist.len().saturating_sub(1);
+            }
         }
     }
 
     pub fn clear_playlist(&mut self) {
         self.playlist.clear();
+        self.playlist_index = 0;
+        self.shuffle_history.clear();
     }
 
     pub fn set_loop_mode(&mut self, mode: LoopMode) {
         self.loop_mode = mode;
     }
 
+    pub fn toggle_shuffle(&mut self) {
+        self.shuffle = !self.shuffle;
+        if self.shuffle {
+            self.shuffle_history.clear();
+            if !self.playlist.is_empty() {
+                self.shuffle_history.push(self.playlist_index);
+            }
+        } else {
+            self.shuffle_history.clear();
+        }
+    }
+
+    pub fn set_volume(&mut self, vol: f32) {
+        self.volume = vol.clamp(0.0, 1.0);
+        if let Some(sink) = &self.sink {
+            sink.set_volume(self.volume);
+        }
+        if self.mode == PlayMode::External {
+            self.send_mpv(&[
+                "set",
+                "volume",
+                &format!("{}", (self.volume * 100.0) as u32),
+            ]);
+        }
+    }
+
+    pub fn volume(&self) -> f32 {
+        self.volume
+    }
+
     pub fn play_next(&mut self) {
         if self.playlist.is_empty() {
             return;
         }
-        match self.loop_mode {
-            LoopMode::NoRepeat => {
-                if self.playlist_index + 1 >= self.playlist.len() {
-                    self.stop();
-                    return;
+        if self.shuffle {
+            let next = if self.playlist.len() == 1 {
+                0
+            } else {
+                let mut rng = rand::thread_rng();
+                loop {
+                    let idx = rng.gen_range(0..self.playlist.len());
+                    if idx != self.playlist_index || self.playlist.len() <= 1 {
+                        break idx;
+                    }
                 }
-                self.playlist_index += 1;
-            }
-            LoopMode::RepeatAll => {
-                self.playlist_index = (self.playlist_index + 1) % self.playlist.len();
-            }
-            LoopMode::RepeatOne => {
-                if self.playlist_index >= self.playlist.len() {
-                    self.playlist_index = 0;
+            };
+            self.playlist_index = next;
+            self.shuffle_history.push(next);
+        } else {
+            match self.loop_mode {
+                LoopMode::NoRepeat => {
+                    if self.playlist_index + 1 >= self.playlist.len() {
+                        self.stop();
+                        return;
+                    }
+                    self.playlist_index += 1;
+                }
+                LoopMode::RepeatAll => {
+                    self.playlist_index = (self.playlist_index + 1) % self.playlist.len();
+                }
+                LoopMode::RepeatOne => {
+                    // Replay current track — do nothing to index
                 }
             }
         }
@@ -283,15 +348,22 @@ impl AudioPlayer {
         if self.playlist.is_empty() {
             return;
         }
-        if self.loop_mode == LoopMode::RepeatAll {
-            if self.playlist_index == 0 {
-                self.playlist_index = self.playlist.len() - 1;
-            } else {
-                self.playlist_index -= 1;
+        if self.shuffle && self.shuffle_history.len() > 1 {
+            self.shuffle_history.pop();
+            if let Some(&prev) = self.shuffle_history.last() {
+                self.playlist_index = prev;
             }
-        } else {
-            if self.playlist_index > 0 {
-                self.playlist_index -= 1;
+        } else if !self.shuffle {
+            if self.loop_mode == LoopMode::RepeatAll {
+                if self.playlist_index == 0 {
+                    self.playlist_index = self.playlist.len() - 1;
+                } else {
+                    self.playlist_index -= 1;
+                }
+            } else {
+                if self.playlist_index > 0 {
+                    self.playlist_index -= 1;
+                }
             }
         }
         self.play_current();
@@ -361,6 +433,11 @@ impl AudioPlayer {
 
         *self.mpv_child.lock().unwrap() = Some(child);
         self.mode = PlayMode::External;
+
+        // Apply volume to mpv
+        let vol_pct = (self.volume * 100.0) as u32;
+        self.send_mpv(&["set", "volume", &format!("{}", vol_pct)]);
+
         self.state = PlayerState {
             title: title.to_string(),
             subtitle: if is_video {

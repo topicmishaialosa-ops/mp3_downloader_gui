@@ -2,6 +2,7 @@ package net.mp3party.downloader
 
 import android.os.Bundle
 import android.widget.ImageButton
+import android.widget.SeekBar
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.WindowCompat
 import net.mp3party.downloader.databinding.ActivityPlayerBinding
@@ -45,6 +46,26 @@ class PlayerActivity : AppCompatActivity() {
             PlaybackManager.playNext()
         }
 
+        // Shuffle button
+        binding.shuffleButton.setOnClickListener {
+            PlaybackManager.toggleShuffle()
+            updateShuffleButton(binding.shuffleButton)
+        }
+        updateShuffleButton(binding.shuffleButton)
+
+        // Volume slider
+        binding.volumeSlider.max = 100
+        binding.volumeSlider.progress = (PlaybackManager.volume * 100).toInt()
+        binding.volumeSlider.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    PlaybackManager.setVolume(progress / 100f)
+                }
+            }
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+        })
+
         val player = PlaybackManager.getPlayer(this)
         binding.playerView.player = player
 
@@ -53,6 +74,10 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun updateLoopButton(btn: ImageButton) {
         btn.alpha = if (PlaybackManager.loopMode == LoopMode.NoRepeat) 0.4f else 1.0f
+    }
+
+    private fun updateShuffleButton(btn: ImageButton) {
+        btn.alpha = if (PlaybackManager.shuffle) 1.0f else 0.4f
     }
 
     override fun onDestroy() {

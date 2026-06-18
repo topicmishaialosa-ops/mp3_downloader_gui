@@ -42,6 +42,9 @@ private slots:
     void onPlayNext();
     void onPlayPrev();
     void onAddToPlaylist();
+    void onToggleShuffle();
+    void onVolumeChanged(int value);
+    void onShowPlaylist();
 
     void runBatchQuery(QVector<BatchQuery> queries, int index);
 
@@ -67,6 +70,9 @@ private:
     QProgressBar *m_progress = nullptr;
     QPushButton *m_searchBtn = nullptr;
     QPushButton *m_loopBtn = nullptr;
+    QPushButton *m_shuffleBtn = nullptr;
+    QSlider *m_volumeSlider = nullptr;
+    QPushButton *m_playlistBtn = nullptr;
     QLabel *m_playerTitle = nullptr;
     QLabel *m_playerSubtitle = nullptr;
     QSlider *m_seekSlider = nullptr;

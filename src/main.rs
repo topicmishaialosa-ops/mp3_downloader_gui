@@ -387,6 +387,8 @@ struct LinkParserApp {
     library_files: Vec<LocalMedia>,
     player: AudioPlayer,
     player_seek_request: Option<f64>,
+    player_volume_request: Option<f32>,
+    show_playlist_window: bool,
     stream_rx: Option<mpsc::Receiver<Result<(String, String, String, bool), String>>>,
 }
 
@@ -424,6 +426,8 @@ impl Default for LinkParserApp {
             library_files: Vec::new(),
             player: AudioPlayer::default(),
             player_seek_request: None,
+            player_volume_request: None,
+            show_playlist_window: false,
             stream_rx: None,
         }
     }
@@ -1182,6 +1186,9 @@ impl LinkParserApp {
         if let Some(seek) = self.player_seek_request.take() {
             self.player.seek_to(seek);
         }
+        if let Some(vol) = self.player_volume_request.take() {
+            self.player.set_volume(vol);
+        }
 
         theme.card().show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -1226,6 +1233,26 @@ impl LinkParserApp {
                             .color(theme.text_muted),
                     );
                 });
+
+                // Shuffle button
+                let shuffle_btn = if self.player.shuffle {
+                    theme.primary_button("🔀")
+                } else {
+                    theme.neutral_button("🔀")
+                };
+                if ui
+                    .add(shuffle_btn)
+                    .on_hover_text(if self.player.shuffle {
+                        "Перемешать: ВКЛ"
+                    } else {
+                        "Перемешать: ВЫКЛ"
+                    })
+                    .clicked()
+                {
+                    self.player.toggle_shuffle();
+                }
+
+                // Loop button
                 let loop_label = match self.player.loop_mode {
                     LoopMode::NoRepeat => "🔁",
                     LoopMode::RepeatAll => "🔁",
@@ -1241,6 +1268,34 @@ impl LinkParserApp {
                 if loop_resp.on_hover_text(self.player.loop_mode.label()).clicked() {
                     self.player.set_loop_mode(self.player.loop_mode.next());
                 }
+
+                // Volume slider
+                let vol = self.player.volume();
+                let vol_label = format!("🔊 {}", (vol * 100.0) as u32);
+                let vol_resp = ui.add(
+                    egui::Slider::new(&mut self.player.volume, 0.0..=1.0)
+                        .clamp_to_range(true)
+                        .show_value(false)
+                        .custom_text(vol_label),
+                );
+                if vol_resp.changed() {
+                    self.player.set_volume(self.player.volume());
+                }
+
+                // Playlist button
+                let pl_text = if self.player.playlist.len() > 1 {
+                    format!("📋 ({})", self.player.playlist.len())
+                } else {
+                    "📋".to_string()
+                };
+                if ui
+                    .add(theme.neutral_button(&pl_text))
+                    .on_hover_text("Плейлист")
+                    .clicked()
+                {
+                    self.show_playlist_window = !self.show_playlist_window;
+                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.small_button("✕").clicked() {
                         self.player.stop();
@@ -3014,6 +3069,65 @@ impl eframe::App for LinkParserApp {
                 });
         }
 
+        if self.show_playlist_window {
+            egui::Window::new("📋 Плейлист")
+                .id("playlist_window".into())
+                .resizable(true)
+                .default_size([420.0, 360.0])
+                .collapsible(true)
+                .frame(
+                    Frame::window(&ctx.style())
+                        .fill(theme.card_bg)
+                        .stroke(Stroke::new(1.0, theme.card_border))
+                        .rounding(Rounding::same(10.0)),
+                )
+                .show(ctx, |ui| {
+                    self.show_playlist_panel(ui, theme);
+                });
+        }
+
+        // Keyboard shortcuts
+        ctx.input(|i| {
+            if self.player.state.has_media {
+                // Space = toggle pause
+                if i.key_pressed(egui::Key::Space) && !i.modifiers.any_ctrl() {
+                    self.player.toggle_pause();
+                }
+                // Left arrow = seek back 5s
+                if i.key_pressed(egui::Key::ArrowLeft) {
+                    let new_pos = (self.player.state.position_secs - 5.0).max(0.0);
+                    self.player_seek_request = Some(new_pos);
+                }
+                // Right arrow = seek forward 5s
+                if i.key_pressed(egui::Key::ArrowRight) {
+                    let new_pos = self.player.state.position_secs + 5.0;
+                    self.player_seek_request = Some(new_pos);
+                }
+                // Up arrow = volume up
+                if i.key_pressed(egui::Key::ArrowUp) {
+                    let new_vol = (self.player.volume + 0.05).min(1.0);
+                    self.player_volume_request = Some(new_vol);
+                }
+                // Down arrow = volume down
+                if i.key_pressed(egui::Key::ArrowDown) {
+                    let new_vol = (self.player.volume - 0.05).max(0.0);
+                    self.player_volume_request = Some(new_vol);
+                }
+            }
+            // Ctrl+Right = next track
+            if i.key_pressed(egui::Key::ArrowRight) && i.modifiers.ctrl {
+                self.player.play_next();
+            }
+            // Ctrl+Left = prev track
+            if i.key_pressed(egui::Key::ArrowLeft) && i.modifiers.ctrl {
+                self.player.play_prev();
+            }
+            // S = toggle shuffle (when not in text field)
+            if i.key_pressed(egui::Key::S) && !i.modifiers.any_ctrl() && !i.modifiers.any_alt() {
+                self.player.toggle_shuffle();
+            }
+        });
+
         egui::CentralPanel::default()
             .frame(Frame {
                 fill: theme.window_bg,
@@ -3831,6 +3945,120 @@ impl LinkParserApp {
         for idx in to_remove {
             self.download_tasks.remove(idx);
         }
+    }
+
+    fn show_playlist_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        ui.horizontal(|ui| {
+            ui.label(
+                theme
+                    .section_title(&format!(
+                        "📋 Плейлист ({} треков)",
+                        self.player.playlist.len()
+                    ))
+                    .size(14.0),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(theme.neutral_button("🗑 Очистить")).clicked() {
+                    self.player.clear_playlist();
+                }
+            });
+        });
+
+        ui.add_space(6.0);
+
+        if self.player.playlist.is_empty() {
+            ui.add_space(24.0);
+            ui.vertical_centered(|ui| {
+                ui.label(
+                    egui::RichText::new("Плейлист пуст")
+                        .size(14.0)
+                        .color(theme.text_muted),
+                );
+                ui.label(
+                    egui::RichText::new("Добавьте треки кнопкой ➕ в результатах поиска или библиотеке")
+                        .size(12.0)
+                        .color(theme.text_muted),
+                );
+            });
+            return;
+        }
+
+        let scroll_height = ui.available_height().max(120.0);
+        egui::ScrollArea::vertical()
+            .id_salt("playlist_scroll")
+            .auto_shrink([false; 2])
+            .max_height(scroll_height)
+            .show(ui, |ui| {
+                let mut to_remove: Option<usize> = None;
+                let mut to_play: Option<usize> = None;
+
+                for (i, item) in self.player.playlist.iter().enumerate() {
+                    let is_current = i == self.player.playlist_index;
+                    let bg = if is_current {
+                        theme.accent.gamma_multiply(0.15)
+                    } else {
+                        Color32::TRANSPARENT
+                    };
+
+                    Frame {
+                        fill: bg,
+                        rounding: Rounding::same(6.0),
+                        inner_margin: Margin::symmetric(8.0, 6.0),
+                        ..Default::default()
+                    }
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let icon = if is_current {
+                                "▶"
+                            } else if item.is_url {
+                                "🌐"
+                            } else {
+                                "🎵"
+                            };
+                            ui.label(icon);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    egui::RichText::new(&item.title)
+                                        .strong()
+                                        .color(theme.text_primary),
+                                );
+                                ui.label(
+                                    egui::RichText::new(&item.subtitle)
+                                        .size(11.0)
+                                        .color(theme.text_muted),
+                                );
+                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .add(
+                                            theme
+                                                .primary_button("▶")
+                                                .min_size(Vec2::new(32.0, 24.0)),
+                                        )
+                                        .on_hover_text("Воспроизвести")
+                                        .clicked()
+                                    {
+                                        to_play = Some(i);
+                                    }
+                                    if ui.small_button("✕").clicked() {
+                                        to_remove = Some(i);
+                                    }
+                                },
+                            );
+                        });
+                    });
+                }
+
+                if let Some(idx) = to_play {
+                    self.player.playlist_index = idx;
+                    self.player.play_current();
+                }
+                if let Some(idx) = to_remove {
+                    self.player.remove_from_playlist(idx);
+                }
+            });
     }
 }
 
