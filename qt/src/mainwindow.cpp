@@ -16,6 +16,7 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QCheckBox>
 #include <QSlider>
 #include <QTabWidget>
 #include <QTimer>
@@ -390,6 +391,10 @@ void MainWindow::onBatchSearch() {
     lay->addWidget(edit);
     auto *counter = new QLabel(QStringLiteral("Будет отправлено запросов: 0"));
     lay->addWidget(counter);
+    auto *autodlCb = new QCheckBox(QStringLiteral("⬇ Автоскачивать первый трек"));
+    autodlCb->setToolTip(QStringLiteral(
+        "Автоматически скачивать первый найденный трек по каждому запросу из списка"));
+    lay->addWidget(autodlCb);
     auto updateCounter = [edit, counter]() {
         const int n = BatchQueries::parse(edit->toPlainText()).size();
         counter->setText(QStringLiteral("Будет отправлено запросов: %1").arg(n));
@@ -405,6 +410,7 @@ void MainWindow::onBatchSearch() {
     lay->addLayout(btnRow);
     QObject::connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
     QObject::connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+    const bool autodownload = autodlCb->isChecked();
     if (dlg.exec() != QDialog::Accepted) {
         return;
     }
@@ -423,10 +429,10 @@ void MainWindow::onBatchSearch() {
     m_resultsList->clear();
     m_tracks.clear();
     onLog(QStringLiteral("⏳ Пакетный поиск: %1 запрос(ов)…").arg(queries.size()));
-    runBatchQuery(queries, 0);
+    runBatchQuery(queries, 0, autodownload);
 }
 
-void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
+void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index, bool autodownload) {
     if (index >= queries.size()) {
         m_searchBtn->setEnabled(true);
         m_progress->setVisible(false);
@@ -436,18 +442,19 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
     const BatchQuery q = queries.at(index);
     const int total = queries.size();
     const auto src = currentSource();
+    const auto fmt = currentYtFormat();
     onLog(QStringLiteral("[%1/%2] 🔎 %3").arg(index + 1).arg(total).arg(q.searchText()));
 
     if (q.isUrl()) {
         onLog(QStringLiteral("  ⚠️ %1 — URL в пакетном режиме пока не поддерживается").arg(q.url));
-        QTimer::singleShot(0, this, [this, queries, index]() {
-            runBatchQuery(queries, index + 1);
+        QTimer::singleShot(0, this, [this, queries, index, autodownload]() {
+            runBatchQuery(queries, index + 1, autodownload);
         });
         return;
     }
 
     const QString query = q.searchText();
-    (void)QtConcurrent::run([this, queries, index, total, src, query]() {
+    (void)QtConcurrent::run([this, queries, index, total, src, fmt, query, autodownload]() {
         QString err;
         QVector<Track> tracks;
         switch (src) {
@@ -464,8 +471,13 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
             tracks = YtDlpHelper::search(query, &err);
             break;
         }
-        QTimer::singleShot(0, this, [this, tracks, err, queries, index]() {
+        QTimer::singleShot(0, this, [this, tracks, err, queries, index, src, fmt, autodownload]() {
             if (!tracks.isEmpty()) {
+                if (autodownload) {
+                    m_downloads.setDownloadFolder(m_folderEdit->text());
+                    m_downloads.enqueue(tracks[0], src, fmt);
+                    onLog(QStringLiteral("  ⬇ авто: %1 — %2").arg(tracks[0].artist, tracks[0].title));
+                }
                 for (const auto &t : tracks) {
                     m_tracks.append(t);
                     m_resultsList->addItem(
@@ -475,7 +487,7 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
             } else {
                 onLog(QStringLiteral("  ✗ %1").arg(err));
             }
-            runBatchQuery(queries, index + 1);
+            runBatchQuery(queries, index + 1, autodownload);
         });
     });
 }

@@ -46,7 +46,7 @@ private slots:
     void onVolumeChanged(int value);
     void onShowPlaylist();
 
-    void runBatchQuery(QVector<BatchQuery> queries, int index);
+    void runBatchQuery(QVector<BatchQuery> queries, int index, bool autodownload = false);
 
 private:
     void setupUi();

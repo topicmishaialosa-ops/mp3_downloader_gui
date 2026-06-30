@@ -6,7 +6,9 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.widget.CheckBox
 import android.widget.EditText
+import android.widget.LinearLayout
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -188,9 +190,18 @@ class SearchFragment : Fragment() {
             setHorizontallyScrolling(true)
             setTextAppearance(android.R.style.TextAppearance_Material_Body1)
         }
+        val autodlCb = CheckBox(ctx).apply {
+            text = "⬇ Автоскачивать первый трек"
+            setPadding(48, 0, 48, 0)
+        }
         val scroll = android.widget.ScrollView(ctx).apply {
-            setPadding(48, 24, 48, 24)
+            setPadding(48, 24, 48, 0)
             addView(edit)
+        }
+        val layout = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(scroll)
+            addView(autodlCb)
         }
         MaterialAlertDialogBuilder(ctx)
             .setTitle("📋 Пакетный поиск")
@@ -199,16 +210,16 @@ class SearchFragment : Fragment() {
                     "Формат: «Исполнитель - Название», «Название» (без разделителя), или URL.\n" +
                     "Нумерация («1. », «12) ») и комментарии после «#» игнорируются.",
             )
-            .setView(scroll)
+            .setView(layout)
             .setPositiveButton("▶ Найти по списку") { _, _ ->
                 val text = edit.text?.toString().orEmpty()
-                runBatchSearch(text)
+                runBatchSearch(text, autodlCb.isChecked)
             }
             .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
-    private fun runBatchSearch(input: String) {
+    private fun runBatchSearch(input: String, autodownload: Boolean = false) {
         val queries = BatchQueryParser.parse(input)
         if (queries.isEmpty()) {
             Snackbar.make(binding.root, "Список пуст", Snackbar.LENGTH_SHORT).show()
@@ -263,6 +274,9 @@ class SearchFragment : Fragment() {
                 val unique = collected.distinctBy { "${it.source}:${it.id}" }
                 adapter.submit(unique)
                 updateEmptyState(show = unique.isEmpty(), hasResults = unique.isNotEmpty())
+                if (autodownload && unique.isNotEmpty()) {
+                    (activity as? MainActivity)?.startDownload(unique[0], ytFormat, adapter, 0)
+                }
                 binding.statusText.text = if (unique.isNotEmpty()) {
                     "✅ Найдено ${unique.size} (из ${queries.size} запрос(ов)" +
                         (if (errorCount > 0) ", ошибок: $errorCount" else "") + ")"

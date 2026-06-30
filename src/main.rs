@@ -385,6 +385,8 @@ struct LinkParserApp {
     show_logs: bool,
     /// Открыто ли модальное окно пакетного поиска.
     show_batch_window: bool,
+    /// Автоскачивать первый найденный трек в пакетном поиске.
+    batch_autodownload: bool,
     log_lines: Vec<String>,
     log_tx: mpsc::Sender<String>,
     log_rx: mpsc::Receiver<String>,
@@ -424,6 +426,7 @@ impl Default for LinkParserApp {
             show_downloads: false,
             show_logs: false,
             show_batch_window: false,
+            batch_autodownload: false,
             log_lines: vec!["✅ Приложение запущено.".to_string()],
             log_tx,
             log_rx,
@@ -3231,7 +3234,11 @@ impl eframe::App for LinkParserApp {
                         self.tracks.push(track);
                     }
                     ParseResult::SearchResults(results) => {
+                        let start = self.tracks.len();
                         self.tracks.extend(results);
+                        if self.batch_autodownload && start < self.tracks.len() {
+                            self.start_download(start);
+                        }
                     }
                     ParseResult::Error(_url, err) => {
                         self.error_count += 1;
@@ -3543,19 +3550,23 @@ impl LinkParserApp {
         );
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui
-                .add_enabled(!self.loading, theme.success_button("▶ Найти по списку"))
-                .clicked()
-            {
-                self.start_batch_search();
-                self.show_batch_window = false;
-            }
-            if ui.add(theme.neutral_button("Очистить")).clicked() {
-                self.batch_input.clear();
-            }
-            if ui.add(theme.neutral_button("Закрыть")).clicked() {
-                self.show_batch_window = false;
-            }
+            ui.checkbox(&mut self.batch_autodownload, "⬇ Автоскачивать первый трек")
+                .on_hover_text("Автоматически скачивать первый найденный трек по каждому запросу из списка");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(theme.neutral_button("Закрыть")).clicked() {
+                    self.show_batch_window = false;
+                }
+                if ui.add(theme.neutral_button("Очистить")).clicked() {
+                    self.batch_input.clear();
+                }
+                if ui
+                    .add_enabled(!self.loading, theme.success_button("▶ Найти по списку"))
+                    .clicked()
+                {
+                    self.start_batch_search();
+                    self.show_batch_window = false;
+                }
+            });
         });
     }
 
