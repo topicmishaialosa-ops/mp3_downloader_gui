@@ -22,7 +22,7 @@ object PesniMeApi {
         .build()
 
     private val trackPattern = Pattern.compile(
-        """"id":(\d+),"artist":"([^"]*)","title":"([^"]*)","version":"[^"]*","duration":\d+,"bitrate":[^,]*,"size":[^,]*,"play":"([^"]+)","download":"([^"]+)"""",
+        """\\"id\\":(\d+),\\"artist\\":\\"([^"\\]*)\\",\\"title\\":\\"([^"\\]*)\\",\\"version\\":\\"[^"\\]*\\",\\"duration\\":(\d+),\\"bitrate\\":([^,]*),\\"size\\":([^,]*),\\"play\\":\\"([^"\\]+)\\",\\"download\\":\\"([^"\\]+)\\"""",
     )
 
     fun search(query: String): List<Track> {
@@ -34,29 +34,17 @@ object PesniMeApi {
             get(fallbackUrl) ?: return emptyList()
         }
 
-        val results = mutableListOf<Track>()
-        val seen = mutableSetOf<String>()
-        val m = trackPattern.matcher(body)
-        while (m.find()) {
-            val id = m.group(1)?.trim().orEmpty()
-            if (id.isEmpty() || !seen.add(id)) continue
-            val artist = unescape(m.group(2)?.trim().orEmpty())
-            val title = unescape(m.group(3)?.trim().orEmpty())
-            val playUrl = m.group(4)?.trim().orEmpty()
-            val downloadUrl = m.group(5)?.trim().orEmpty()
-            val url = if (downloadUrl.isNotEmpty()) downloadUrl else playUrl
-            if (title.isEmpty()) continue
-            results.add(
-                Track(
-                    id = id,
-                    artist = artist,
-                    title = title,
-                    streamUrl = url,
-                    source = DownloadSource.PesniMe,
-                ),
-            )
+        val allResults = extractFromPage(body)
+        val q = query.trim().lowercase()
+        val filtered = allResults.filter { t ->
+            t.artist.lowercase().startsWith(q) || t.title.lowercase().startsWith(q)
         }
-        return results.take(30)
+        if (filtered.isNotEmpty()) return filtered.take(30)
+
+        val results = allResults
+        if (results.isNotEmpty()) return results.take(30)
+
+        return emptyList()
     }
 
     fun download(track: Track, destFile: File): String {

@@ -35,9 +35,11 @@ static QVector<Track> extractTracks(const QString &body) {
 
     QRegularExpression re(
         QStringLiteral(
-            "\"id\":(\\d+),\"artist\":\"([^\"]*)\",\"title\":\"([^\"]*)\","
-            "\"version\":\"[^\"]*\",\"duration\":\\d+,\"bitrate\":[^,]*,\"size\":[^,]*"
-            ",\"play\":\"([^\"]+)\",\"download\":\"([^\"]+)\""));
+            "\\\\\"id\\\\\":(\\d+),\\\\\"artist\\\\\":\\\\\"([^\"\\\\]*)\\\\\","
+            "\\\\\"title\\\\\":\\\\\"([^\"\\\\]*)\\\\\","
+            "\\\\\"version\\\\\":\\\\\"[^\"\\\\]*\\\\\",\\\\\"duration\\\\\":(\\d+),"
+            "\\\\\"bitrate\\\\\":([^,]*),\\\\\"size\\\\\":([^,]*),"
+            "\\\\\"play\\\\\":\\\\\"([^\"\\\\]+)\\\\\",\\\\\"download\\\\\":\\\\\"([^\"\\\\]+)\\\\\""));
 
     auto it = re.globalMatch(body);
     while (it.hasNext()) {
@@ -51,8 +53,8 @@ static QVector<Track> extractTracks(const QString &body) {
         t.id = id;
         t.artist = unescapeJson(m.captured(2).trimmed());
         t.title = unescapeJson(m.captured(3).trimmed());
-        const QString playUrl = m.captured(4).trimmed();
-        const QString downloadUrl = m.captured(5).trimmed();
+        const QString playUrl = m.captured(7).trimmed();
+        const QString downloadUrl = m.captured(8).trimmed();
         t.url = !downloadUrl.isEmpty() ? downloadUrl : playUrl;
         t.source = DownloadSource::PesniMe;
         if (!t.title.isEmpty()) {
@@ -77,6 +79,17 @@ QVector<Track> PesniMeApi::search(const QString &query, QString *error) {
     const QString body = QString::fromUtf8(resp.body);
     auto results = extractTracks(body);
 
+    const QString q = query.trimmed().toLower();
+    auto match = [&](const Track &t) {
+        return t.artist.toLower().startsWith(q)
+               || t.title.toLower().startsWith(q);
+    };
+    QVector<Track> filtered;
+    std::copy_if(results.begin(), results.end(), std::back_inserter(filtered), match);
+    if (!filtered.isEmpty()) {
+        return filtered.mid(0, 30);
+    }
+
     if (results.isEmpty()) {
         // Попробуем через pesni.me (без music. поддомена)
         const QUrl url2(QStringLiteral("https://pesni.me/search/")
@@ -84,6 +97,11 @@ QVector<Track> PesniMeApi::search(const QString &query, QString *error) {
         const auto resp2 = HttpClient::get(url2);
         if (resp2.ok()) {
             results = extractTracks(QString::fromUtf8(resp2.body));
+            QVector<Track> filtered2;
+            std::copy_if(results.begin(), results.end(), std::back_inserter(filtered2), match);
+            if (!filtered2.isEmpty()) {
+                return filtered2.mid(0, 30);
+            }
         }
     }
 
