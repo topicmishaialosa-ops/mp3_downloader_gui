@@ -3236,8 +3236,10 @@ impl eframe::App for LinkParserApp {
                     ParseResult::SearchResults(results) => {
                         let start = self.tracks.len();
                         self.tracks.extend(results);
-                        if self.batch_autodownload && start < self.tracks.len() {
-                            self.start_download(start);
+                        if self.batch_autodownload {
+                            for i in start..self.tracks.len() {
+                                self.start_download(i);
+                            }
                         }
                     }
                     ParseResult::Error(_url, err) => {

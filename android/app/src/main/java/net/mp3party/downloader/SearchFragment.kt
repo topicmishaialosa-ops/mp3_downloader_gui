@@ -275,7 +275,7 @@ class SearchFragment : Fragment() {
                 adapter.submit(unique)
                 updateEmptyState(show = unique.isEmpty(), hasResults = unique.isNotEmpty())
                 if (autodownload && unique.isNotEmpty()) {
-                    (activity as? MainActivity)?.startDownload(unique[0], ytFormat, adapter, 0)
+                    (activity as? MainActivity)?.startDownloadAll(unique, ytFormat)
                 }
                 binding.statusText.text = if (unique.isNotEmpty()) {
                     "✅ Найдено ${unique.size} (из ${queries.size} запрос(ов)" +
