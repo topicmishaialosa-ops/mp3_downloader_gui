@@ -39,7 +39,7 @@ static RE_DRIVEMUSIC_SEARCH: LazyLock<Regex> = LazyLock::new(|| {
 });
 static RE_PESNIME_TRACK: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#""id":(\d+),"artist":"([^"]*)","title":"([^"]*)","version":"[^"]*","duration":\d+,"bitrate":[^,]*,"size":[^,]*,"play":"([^"]+)","download":"([^"]+)""#,
+        r#"\\"id\\":(\d+),\\"artist\\":\\"([^"\\]*)\\",\\"title\\":\\"([^"\\]*)\\",\\"version\\":\\"[^"\\]*\\",\\"duration\\":(\d+),\\"bitrate\\":([^,]*),\\"size\\":([^,]*),\\"play\\":\\"([^"\\]+)\\",\\"download\\":\\"([^"\\]+)\\""#,
     )
     .unwrap()
 });
@@ -1146,8 +1146,8 @@ impl LinkParserApp {
             let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
             let artist = caps.get(2).map(|m| Self::unescape_json(m.as_str())).unwrap_or_default();
             let title = caps.get(3).map(|m| Self::unescape_json(m.as_str())).unwrap_or_default();
-            let play_url = caps.get(4).map(|m| m.as_str()).unwrap_or("");
-            let download_url = caps.get(5).map(|m| m.as_str()).unwrap_or("");
+            let play_url = caps.get(7).map(|m| m.as_str()).unwrap_or("");
+            let download_url = caps.get(8).map(|m| m.as_str()).unwrap_or("");
             if id.is_empty() || title.is_empty() || !seen.insert(id.to_string()) {
                 continue;
             }
