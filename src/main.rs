@@ -1188,6 +1188,17 @@ impl LinkParserApp {
         let body = resp.text().map_err(|e| format!("Ошибка чтения: {}", e))?;
         let results = Self::pesnime_extract_tracks(&body);
 
+        let query_lower = query.to_lowercase();
+        let filter = |t: &TrackInfo| -> bool {
+            t.artist.to_lowercase().starts_with(&query_lower)
+                || t.title.to_lowercase().starts_with(&query_lower)
+        };
+
+        let exact: Vec<TrackInfo> = results.iter().filter(|t| filter(t)).cloned().take(30).collect();
+        if !exact.is_empty() {
+            return Ok(exact);
+        }
+
         if results.is_empty() {
             // Попробуем через главную страницу поиска
             let url2 = format!("https://pesni.me/search/{}", urlencoding::encode(query));
@@ -1199,8 +1210,9 @@ impl LinkParserApp {
                 if resp2.status().is_success() {
                     if let Ok(body2) = resp2.text() {
                         let results2 = Self::pesnime_extract_tracks(&body2);
-                        if !results2.is_empty() {
-                            return Ok(results2.into_iter().take(30).collect());
+                        let filtered2: Vec<TrackInfo> = results2.into_iter().filter(|t| filter(t)).take(30).collect();
+                        if !filtered2.is_empty() {
+                            return Ok(filtered2);
                         }
                     }
                 }
