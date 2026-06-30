@@ -79,10 +79,14 @@ QVector<Track> PesniMeApi::search(const QString &query, QString *error) {
     const QString body = QString::fromUtf8(resp.body);
     auto results = extractTracks(body);
 
-    const QString q = query.trimmed().toLower();
+    const QStringList words = query.trimmed().toLower().split(QRegularExpression(QStringLiteral("\\s+")), Qt::SkipEmptyParts);
     auto match = [&](const Track &t) {
-        return t.artist.toLower().startsWith(q)
-               || t.title.toLower().startsWith(q);
+        const QString al = t.artist.toLower();
+        const QString tl = t.title.toLower();
+        for (const auto &w : words) {
+            if (al.startsWith(w) || tl.startsWith(w)) return true;
+        }
+        return false;
     };
     QVector<Track> filtered;
     std::copy_if(results.begin(), results.end(), std::back_inserter(filtered), match);
@@ -98,7 +102,7 @@ QVector<Track> PesniMeApi::search(const QString &query, QString *error) {
         if (resp2.ok()) {
             results = extractTracks(QString::fromUtf8(resp2.body));
             QVector<Track> filtered2;
-            std::copy_if(results.begin(), results.end(), std::back_inserter(filtered2), match);
+            std::copy_if(results.cbegin(), results.cend(), std::back_inserter(filtered2), match);
             if (!filtered2.isEmpty()) {
                 return filtered2.mid(0, 30);
             }

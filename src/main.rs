@@ -1188,15 +1188,17 @@ impl LinkParserApp {
         let body = resp.text().map_err(|e| format!("Ошибка чтения: {}", e))?;
         let results = Self::pesnime_extract_tracks(&body);
 
-        let query_lower = query.to_lowercase();
+        let words: Vec<String> = query.split_whitespace()
+            .map(|w| w.to_lowercase()).collect();
         let filter = |t: &TrackInfo| -> bool {
-            t.artist.to_lowercase().starts_with(&query_lower)
-                || t.title.to_lowercase().starts_with(&query_lower)
+            let al = t.artist.to_lowercase();
+            let tl = t.title.to_lowercase();
+            words.iter().any(|w| al.starts_with(w) || tl.starts_with(w))
         };
 
-        let exact: Vec<TrackInfo> = results.iter().filter(|t| filter(t)).cloned().take(30).collect();
-        if !exact.is_empty() {
-            return Ok(exact);
+        let matched: Vec<TrackInfo> = results.iter().filter(|t| filter(t)).cloned().take(30).collect();
+        if !matched.is_empty() {
+            return Ok(matched);
         }
 
         if results.is_empty() {
@@ -1210,9 +1212,9 @@ impl LinkParserApp {
                 if resp2.status().is_success() {
                     if let Ok(body2) = resp2.text() {
                         let results2 = Self::pesnime_extract_tracks(&body2);
-                        let filtered2: Vec<TrackInfo> = results2.into_iter().filter(|t| filter(t)).take(30).collect();
-                        if !filtered2.is_empty() {
-                            return Ok(filtered2);
+                        let matched2: Vec<TrackInfo> = results2.into_iter().filter(|t| filter(t)).take(30).collect();
+                        if !matched2.is_empty() {
+                            return Ok(matched2);
                         }
                     }
                 }

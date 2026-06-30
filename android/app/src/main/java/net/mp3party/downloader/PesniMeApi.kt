@@ -35,9 +35,11 @@ object PesniMeApi {
         }
 
         val allResults = extractFromPage(body)
-        val q = query.trim().lowercase()
+        val words = query.trim().lowercase().split("\\s+".toRegex())
         val filtered = allResults.filter { t ->
-            t.artist.lowercase().startsWith(q) || t.title.lowercase().startsWith(q)
+            val al = t.artist.lowercase()
+            val tl = t.title.lowercase()
+            words.any { w -> al.startsWith(w) || tl.startsWith(w) }
         }
         if (filtered.isNotEmpty()) return filtered.take(30)
 
@@ -95,7 +97,7 @@ object PesniMeApi {
             return track.streamUrl
         }
         val body = get(trackUrl(track.id)) ?: return null
-        val playRe = Pattern.compile(""""play":"([^"]+)"""")
+        val playRe = Pattern.compile("""\\"play\\":\\"([^"\\]+)\\"""")
         val m = playRe.matcher(body)
         return if (m.find()) m.group(1) else null
     }
@@ -111,8 +113,8 @@ object PesniMeApi {
             if (id.isEmpty() || !seen.add(id)) continue
             val artist = unescape(m.group(2)?.trim().orEmpty())
             val title = unescape(m.group(3)?.trim().orEmpty())
-            val playUrl = m.group(4)?.trim().orEmpty()
-            val downloadUrl = m.group(5)?.trim().orEmpty()
+            val playUrl = m.group(7)?.trim().orEmpty()
+            val downloadUrl = m.group(8)?.trim().orEmpty()
             val url = if (downloadUrl.isNotEmpty()) downloadUrl else playUrl
             if (title.isEmpty()) continue
             results.add(Track(id, artist, title, url, DownloadSource.PesniMe))
