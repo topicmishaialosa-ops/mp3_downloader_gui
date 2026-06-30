@@ -475,10 +475,8 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index, bool auto
             if (!tracks.isEmpty()) {
                 if (autodownload) {
                     m_downloads.setDownloadFolder(m_folderEdit->text());
-                    for (const auto &t : tracks) {
-                        m_downloads.enqueue(t, src, fmt);
-                        onLog(QStringLiteral("  ⬇ авто: %1 — %2").arg(t.artist, t.title));
-                    }
+                    m_downloads.enqueue(tracks[0], src, fmt);
+                    onLog(QStringLiteral("  ⬇ авто: %1 — %2").arg(tracks[0].artist, tracks[0].title));
                 }
                 for (const auto &t : tracks) {
                     m_tracks.append(t);

@@ -243,6 +243,7 @@ class SearchFragment : Fragment() {
                     }
                 }
                 val collected = mutableListOf<Track>()
+                val autodlTracks = mutableListOf<Track>()
                 var errorCount = 0
                 val app = requireContext().applicationContext
                 queries.forEachIndexed { idx, q ->
@@ -262,6 +263,7 @@ class SearchFragment : Fragment() {
                             }
                         }
                         if (results.isNotEmpty()) {
+                            if (autodownload) autodlTracks.add(results[0])
                             collected.addAll(results)
                         } else {
                             errorCount++
@@ -274,8 +276,8 @@ class SearchFragment : Fragment() {
                 val unique = collected.distinctBy { "${it.source}:${it.id}" }
                 adapter.submit(unique)
                 updateEmptyState(show = unique.isEmpty(), hasResults = unique.isNotEmpty())
-                if (autodownload && unique.isNotEmpty()) {
-                    (activity as? MainActivity)?.startDownloadAll(unique, ytFormat)
+                if (autodlTracks.isNotEmpty()) {
+                    (activity as? MainActivity)?.startDownloadAll(autodlTracks, ytFormat)
                 }
                 binding.statusText.text = if (unique.isNotEmpty()) {
                     "✅ Найдено ${unique.size} (из ${queries.size} запрос(ов)" +
