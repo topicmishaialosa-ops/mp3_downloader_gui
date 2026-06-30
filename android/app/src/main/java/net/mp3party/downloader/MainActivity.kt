@@ -308,7 +308,6 @@ class MainActivity : AppCompatActivity() {
         adapter: TrackAdapter,
         position: Int,
     ) {
-        if (track.source != DownloadSource.YouTube) return
         if (downloading || streaming) {
             Snackbar.make(binding.root, "Дождитесь завершения операции", Snackbar.LENGTH_SHORT).show()
             return
@@ -319,16 +318,24 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                if (!ensureYtDlp()) {
+                if (track.source == DownloadSource.YouTube && !ensureYtDlp()) {
                     return@launch
                 }
                 val url = withContext(Dispatchers.IO) {
-                    YtDlpHelper.getStreamUrl(applicationContext, track, format)
+                    when (track.source) {
+                        DownloadSource.PesniMe -> PesniMeApi.resolveStreamUrl(track)
+                        DownloadSource.YouTube -> YtDlpHelper.getStreamUrl(applicationContext, track, format)
+                        else -> null
+                    }
+                }
+                if (url == null) {
+                    Snackbar.make(binding.root, "Стрим недоступен для этого источника", Snackbar.LENGTH_LONG).show()
+                    return@launch
                 }
                 val title = listOf(track.artist, track.title)
                     .filter { it.isNotBlank() }
                     .joinToString(" — ")
-                val isVideo = format == YtFormat.MP4
+                val isVideo = track.source == DownloadSource.YouTube && format == YtFormat.MP4
                 PlaybackManager.playStream(this@MainActivity, url, title, track.id, isVideo)
                 binding.playerBar.root.isVisible = true
                 if (isVideo) {

@@ -6,6 +6,7 @@ enum class DownloadSource {
     MP3Party,
     DriveMusic,
     YouTube,
+    PesniMe,
 }
 
 enum class YtFormat {

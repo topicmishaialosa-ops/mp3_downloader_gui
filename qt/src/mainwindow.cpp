@@ -26,6 +26,7 @@
 #include "drivemusicapi.h"
 #include "mp3partyapi.h"
 #include "paths.h"
+#include "pesnimeapi.h"
 #include "mpvhelper.h"
 #include "ytdlphelper.h"
 
@@ -52,6 +53,7 @@ void MainWindow::setupUi() {
     m_sourceCombo = new QComboBox();
     m_sourceCombo->addItem(QStringLiteral("MP3Party"), static_cast<int>(DownloadSource::Mp3Party));
     m_sourceCombo->addItem(QStringLiteral("DriveMusic"), static_cast<int>(DownloadSource::DriveMusic));
+    m_sourceCombo->addItem(QStringLiteral("Pesni.me"), static_cast<int>(DownloadSource::PesniMe));
     m_sourceCombo->addItem(QStringLiteral("YouTube"), static_cast<int>(DownloadSource::YtDlp));
     m_ytFormatCombo = new QComboBox();
     m_ytFormatCombo->addItem(QStringLiteral("MP3"), static_cast<int>(YtFormat::Mp3));
@@ -347,6 +349,9 @@ void MainWindow::onSearch() {
         case DownloadSource::DriveMusic:
             tracks = DriveMusicApi::search(query, &err);
             break;
+        case DownloadSource::PesniMe:
+            tracks = PesniMeApi::search(query, &err);
+            break;
         case DownloadSource::YtDlp:
             tracks = YtDlpHelper::search(query, &err);
             break;
@@ -451,6 +456,9 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
             break;
         case DownloadSource::DriveMusic:
             tracks = DriveMusicApi::search(query, &err);
+            break;
+        case DownloadSource::PesniMe:
+            tracks = PesniMeApi::search(query, &err);
             break;
         case DownloadSource::YtDlp:
             tracks = YtDlpHelper::search(query, &err);
@@ -600,6 +608,10 @@ void MainWindow::startStream(const Track &track) {
         case DownloadSource::DriveMusic:
             url = DriveMusicApi::streamUrl(track, &err);
             sub = QStringLiteral("DriveMusic");
+            break;
+        case DownloadSource::PesniMe:
+            url = PesniMeApi::streamUrl(track, &err);
+            sub = QStringLiteral("Pesni.me");
             break;
         case DownloadSource::YtDlp:
             url = YtDlpHelper::streamUrl(track, fmt, &err);

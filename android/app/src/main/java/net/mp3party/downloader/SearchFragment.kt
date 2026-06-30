@@ -53,6 +53,7 @@ class SearchFragment : Fragment() {
 
         binding.chipMp3party.setOnClickListener { setSource(DownloadSource.MP3Party) }
         binding.chipDrivemusic.setOnClickListener { setSource(DownloadSource.DriveMusic) }
+        binding.chipPesnime.setOnClickListener { setSource(DownloadSource.PesniMe) }
         binding.chipYoutube.setOnClickListener { setSource(DownloadSource.YouTube) }
         binding.chipMp3.setOnClickListener { ytFormat = YtFormat.MP3 }
         binding.chipMp4.setOnClickListener { ytFormat = YtFormat.MP4 }
@@ -84,6 +85,7 @@ class SearchFragment : Fragment() {
         binding.statusText.text = when (source) {
             DownloadSource.MP3Party -> "Поиск на mp3party.net"
             DownloadSource.DriveMusic -> "Поиск на drivemusic.me"
+            DownloadSource.PesniMe -> "Поиск на pesni.me"
             DownloadSource.YouTube -> "Поиск на YouTube (yt-dlp)"
         }
         updateYtdlpStatus()
@@ -117,6 +119,7 @@ class SearchFragment : Fragment() {
                 DownloadSource.YouTube -> "YouTube: «$query»…"
                 DownloadSource.DriveMusic -> "DriveMusic: «$query»…"
                 DownloadSource.MP3Party -> "MP3Party: «$query»…"
+                DownloadSource.PesniMe -> "Pesni.me: «$query»…"
             },
         )
         binding.searchButton.isEnabled = false
@@ -142,6 +145,7 @@ class SearchFragment : Fragment() {
                     when (source) {
                         DownloadSource.MP3Party -> Mp3PartyApi.search(query)
                         DownloadSource.DriveMusic -> DriveMusicApi.search(query)
+                        DownloadSource.PesniMe -> PesniMeApi.search(query)
                         DownloadSource.YouTube -> {
                             val app = requireContext().applicationContext
                             YtDlpHelper.search(app, query)
@@ -242,6 +246,7 @@ class SearchFragment : Fragment() {
                             when (source) {
                                 DownloadSource.MP3Party -> Mp3PartyApi.search(q.searchText())
                                 DownloadSource.DriveMusic -> DriveMusicApi.search(q.searchText())
+                                DownloadSource.PesniMe -> PesniMeApi.search(q.searchText())
                                 DownloadSource.YouTube -> YtDlpHelper.search(app, q.searchText())
                             }
                         }

@@ -23,6 +23,8 @@ qt_add_executable(mp3_downloader_gui_qt
     src/mp3partyapi.h
     src/drivemusicapi.cpp
     src/drivemusicapi.h
+    src/pesnimeapi.cpp
+    src/pesnimeapi.h
     src/ytdlphelper.cpp
     src/ytdlphelper.h
     src/mpvhelper.cpp

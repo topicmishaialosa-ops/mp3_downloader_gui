@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 // ═══════════════════════════════════════════
 
 static RE_ID_EXTRACT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?:/download/|/music/)(\d+)|(?:^|/)(\d+)/?$").unwrap());
+    LazyLock::new(|| Regex::new(r"(?:/download/|/music/|/track/)(\d+)|(?:^|/)(\d+)/?$").unwrap());
 static RE_DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+$").unwrap());
 static RE_YTDLP_PERCENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d{1,3})(?:\.\d+)?%").unwrap());
@@ -37,8 +37,15 @@ static RE_DRIVEMUSIC_SEARCH: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+static RE_PESNIME_TRACK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#""id":(\d+),"artist":"([^"]*)","title":"([^"]*)","version":"[^"]*","duration":\d+,"bitrate":[^,]*,"size":[^,]*,"play":"([^"]+)","download":"([^"]+)""#,
+    )
+    .unwrap()
+});
 
 const DRIVEMUSIC_BASE: &str = "https://ru.drivemusic.me";
+const PESNIME_BASE: &str = "https://music.pesni.me";
 
 /// Минимальный размер MP3; меньше — считаем ошибкой (HTML/редирект) и удаляем
 const MIN_DOWNLOAD_BYTES: u64 = 50 * 1024;
@@ -115,6 +122,7 @@ enum DownloadSource {
     Mp3Party,
     DriveMusic,
     YtDlp,
+    PesniMe,
 }
 
 impl DownloadSource {
@@ -123,6 +131,7 @@ impl DownloadSource {
             DownloadSource::Mp3Party => "MP3Party",
             DownloadSource::DriveMusic => "DriveMusic",
             DownloadSource::YtDlp => "YouTube (yt-dlp)",
+            DownloadSource::PesniMe => "Pesni.me",
         }
     }
 }
@@ -1113,6 +1122,131 @@ impl LinkParserApp {
         }
     }
 
+    fn pesnime_search_url(query: &str) -> String {
+        format!("{}/search/{}?type=tracks", PESNIME_BASE, urlencoding::encode(query))
+    }
+
+    fn pesnime_track_url(id: &str) -> String {
+        format!("{}/track/{}", PESNIME_BASE, id)
+    }
+
+    fn pesnime_client() -> Result<reqwest::blocking::Client, String> {
+        reqwest::blocking::Client::builder()
+            .cookie_store(true)
+            .redirect(reqwest::redirect::Policy::limited(8))
+            .timeout(Duration::from_secs(60))
+            .build()
+            .map_err(|e| format!("Ошибка клиента: {}", e))
+    }
+
+    fn pesnime_extract_tracks(body: &str) -> Vec<TrackInfo> {
+        let mut results: Vec<TrackInfo> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for caps in RE_PESNIME_TRACK.captures_iter(body) {
+            let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let artist = caps.get(2).map(|m| Self::unescape_json(m.as_str())).unwrap_or_default();
+            let title = caps.get(3).map(|m| Self::unescape_json(m.as_str())).unwrap_or_default();
+            let play_url = caps.get(4).map(|m| m.as_str()).unwrap_or("");
+            let download_url = caps.get(5).map(|m| m.as_str()).unwrap_or("");
+            if id.is_empty() || title.is_empty() || !seen.insert(id.to_string()) {
+                continue;
+            }
+            let url = if !download_url.is_empty() {
+                download_url.to_string()
+            } else if !play_url.is_empty() {
+                play_url.to_string()
+            } else {
+                Self::pesnime_track_url(id)
+            };
+            results.push(TrackInfo {
+                id: id.to_string(),
+                artist,
+                title,
+                url,
+            });
+        }
+        results
+    }
+
+    /// Поиск на pesni.me
+    fn search_tracks_pesnime(query: &str) -> Result<Vec<TrackInfo>, String> {
+        let url = Self::pesnime_search_url(query);
+
+        let client = Self::pesnime_client()?;
+        let resp = client
+            .get(&url)
+            .header("User-Agent", BROWSER_USER_AGENT)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+            .send()
+            .map_err(|e| format!("Ошибка запроса: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {} при поиске Pesni.me", resp.status()));
+        }
+
+        let body = resp.text().map_err(|e| format!("Ошибка чтения: {}", e))?;
+        let results = Self::pesnime_extract_tracks(&body);
+
+        if results.is_empty() {
+            // Попробуем через главную страницу поиска
+            let url2 = format!("https://pesni.me/search/{}", urlencoding::encode(query));
+            if let Ok(resp2) = client
+                .get(&url2)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .send()
+            {
+                if resp2.status().is_success() {
+                    if let Ok(body2) = resp2.text() {
+                        let results2 = Self::pesnime_extract_tracks(&body2);
+                        if !results2.is_empty() {
+                            return Ok(results2.into_iter().take(30).collect());
+                        }
+                    }
+                }
+            }
+            Err(format!("Ничего не найдено на Pesni.me по запросу «{}».", query))
+        } else {
+            Ok(results.into_iter().take(30).collect())
+        }
+    }
+
+    /// Получение информации о треке с pesni.me по ID
+    fn fetch_track_info_pesnime(id: &str) -> Result<TrackInfo, String> {
+        let url = Self::pesnime_track_url(id);
+
+        let client = Self::pesnime_client()?;
+        let resp = client
+            .get(&url)
+            .header("User-Agent", BROWSER_USER_AGENT)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+            .send()
+            .map_err(|e| format!("Ошибка запроса: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {} для {}", resp.status(), url));
+        }
+
+        let body = resp.text().map_err(|e| format!("Ошибка чтения: {}", e))?;
+        let results = Self::pesnime_extract_tracks(&body);
+
+        results.into_iter().next().ok_or_else(|| {
+            format!("Не удалось распознать трек Pesni.me ID {}", id)
+        })
+    }
+
+    /// Получение URL для стриминга с pesni.me
+    fn pesnime_stream_url(track: &TrackInfo) -> Result<String, String> {
+        // Если в track.url уже есть play URL (начинается с https://s...pl.pesni.me)
+        if track.url.contains("pl.pesni.me") {
+            return Ok(track.url.clone());
+        }
+        // Иначе парсим страницу трека
+        let info = Self::fetch_track_info_pesnime(&track.id)?;
+        Ok(info.url)
+    }
+
     fn drivemusic_stream_url(track: &TrackInfo) -> Result<String, String> {
         let page = Self::drivemusic_page_url(track)?;
         let client = Self::drivemusic_client()?;
@@ -1167,6 +1301,7 @@ impl LinkParserApp {
                         }
                     }
                     DownloadSource::DriveMusic => LinkParserApp::drivemusic_stream_url(&track)?,
+                    DownloadSource::PesniMe => LinkParserApp::pesnime_stream_url(&track)?,
                     DownloadSource::YtDlp => LinkParserApp::ytdlp_stream_url(&track, fmt)?,
                 };
                 let title = format!("{} — {}", track.artist, track.title);
@@ -2206,6 +2341,182 @@ impl LinkParserApp {
         });
     }
 
+    /// Скачивание трека с pesni.me
+    fn download_track_pesnime(
+        track: TrackInfo,
+        folder: PathBuf,
+        status: Arc<Mutex<DownloadStatus>>,
+        cancel: Arc<AtomicBool>,
+        log_tx: mpsc::Sender<String>,
+    ) {
+        thread::spawn(move || {
+            let fail = |status: &Arc<Mutex<DownloadStatus>>, msg: String| {
+                if Self::is_download_cancelled(&cancel) {
+                    Self::set_download_stopped(&status, &cancel, None);
+                    Self::log_send(&log_tx, "⏹ Pesni.me: скачивание остановлено");
+                    return;
+                }
+                Self::log_send(&log_tx, format!("❌ Pesni.me: {}", msg));
+                let mut s = status.lock().unwrap();
+                *s = DownloadStatus::Failed(msg);
+            };
+
+            let stop_if_cancelled =
+                |status: &Arc<Mutex<DownloadStatus>>, filepath: &Path| -> bool {
+                    if !Self::is_download_cancelled(&cancel) {
+                        return false;
+                    }
+                    let _ = std::fs::remove_file(filepath);
+                    Self::set_download_stopped(status, &cancel, None);
+                    Self::log_send(&log_tx, "⏹ Pesni.me: скачивание остановлено");
+                    true
+                };
+
+            Self::log_send(
+                &log_tx,
+                format!("📥 Pesni.me: {} — {}", track.artist, track.title),
+            );
+
+            let filename = format!(
+                "{} - {}_{}.mp3",
+                track.artist.trim(),
+                track.title.trim(),
+                track.id
+            )
+            .replace(|c: char| "/\\:*?\"<>|".contains(c), "_");
+
+            let filepath = folder.join(&filename);
+            let _ = std::fs::create_dir_all(&folder);
+
+            {
+                let mut s = status.lock().unwrap();
+                *s = DownloadStatus::Downloading {
+                    progress: 0.0,
+                    bytes: 0,
+                    total: 0,
+                };
+            }
+
+            if stop_if_cancelled(&status, &filepath) {
+                return;
+            }
+
+            // Получаем download URL со страницы трека
+            let download_url = if track.url.contains("dw.pesni.me") {
+                track.url.clone()
+            } else {
+                let info = match Self::fetch_track_info_pesnime(&track.id) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        fail(&status, e);
+                        return;
+                    }
+                };
+                info.url
+            };
+
+            let client = match Self::pesnime_client() {
+                Ok(c) => c,
+                Err(e) => {
+                    fail(&status, e);
+                    return;
+                }
+            };
+
+            if stop_if_cancelled(&status, &filepath) {
+                return;
+            }
+
+            Self::log_send(&log_tx, format!("Pesni.me: скачиваю {}", download_url));
+
+            let resp = match client
+                .get(&download_url)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .header("Referer", &Self::pesnime_track_url(&track.id))
+                .header("Accept", "audio/mpeg,application/octet-stream,*/*;q=0.8")
+                .send()
+            {
+                Ok(r) if r.status().is_success() => r,
+                Ok(r) => {
+                    fail(&status, format!("HTTP {}", r.status()));
+                    return;
+                }
+                Err(e) => {
+                    fail(&status, e.to_string());
+                    return;
+                }
+            };
+
+            let total = resp.content_length().unwrap_or(0);
+            let mut file = match std::fs::File::create(&filepath) {
+                Ok(f) => f,
+                Err(e) => {
+                    fail(&status, format!("Файл: {}", e));
+                    return;
+                }
+            };
+
+            let mut downloaded: u64 = 0;
+            let mut buffer = [0u8; 8192];
+            let mut reader = resp;
+            let mut read_err = None;
+
+            loop {
+                if stop_if_cancelled(&status, &filepath) {
+                    return;
+                }
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if let Err(e) = file.write_all(&buffer[..n]) {
+                            read_err = Some(format!("Запись: {}", e));
+                            break;
+                        }
+                        downloaded += n as u64;
+                        let progress = if total > 0 {
+                            downloaded as f32 / total as f32
+                        } else {
+                            0.0
+                        };
+                        let mut s = status.lock().unwrap();
+                        *s = DownloadStatus::Downloading {
+                            progress: progress.min(1.0),
+                            bytes: downloaded,
+                            total,
+                        };
+                    }
+                    Err(e) => {
+                        read_err = Some(format!("Чтение: {}", e));
+                        break;
+                    }
+                }
+            }
+            drop(file);
+
+            if let Some(e) = read_err {
+                let _ = std::fs::remove_file(&filepath);
+                fail(&status, e);
+                return;
+            }
+
+            if downloaded < MIN_DOWNLOAD_BYTES {
+                let _ = std::fs::remove_file(&filepath);
+                fail(
+                    &status,
+                    format!(
+                        "файл {} KB — возможно, ссылка устарела",
+                        downloaded.max(1) / 1024
+                    ),
+                );
+                return;
+            }
+
+            Self::log_send(&log_tx, format!("✅ Pesni.me: {}", filepath.display()));
+            let mut s = status.lock().unwrap();
+            *s = DownloadStatus::Completed(filepath.to_string_lossy().to_string());
+        });
+    }
+
     /// Скачивание через yt-dlp (MP3 или MP4, как в yt-dlp-util)
     fn download_track_ytdlp(
         track: TrackInfo,
@@ -2463,7 +2774,12 @@ impl LinkParserApp {
         let log_tx = self.log_tx.clone();
         thread::spawn(move || {
             for (orig_url, id) in ids {
-                match Self::fetch_track_info(&id) {
+                let result = if orig_url.contains("pesni.me") || orig_url.contains("pesni.me") {
+                    Self::fetch_track_info_pesnime(&id)
+                } else {
+                    Self::fetch_track_info(&id)
+                };
+                match result {
                     Ok(track) => {
                         let _ = tx.send(ParseResult::Success(track));
                     }
@@ -2518,6 +2834,7 @@ impl LinkParserApp {
                 DownloadSource::Mp3Party => Self::search_tracks(&query),
                 DownloadSource::DriveMusic => Self::search_tracks_drivemusic(&query),
                 DownloadSource::YtDlp => Self::search_tracks_ytdlp(&query),
+                DownloadSource::PesniMe => Self::search_tracks_pesnime(&query),
             };
             match result {
                 Ok(results) => {
@@ -2603,6 +2920,7 @@ impl LinkParserApp {
                     DownloadSource::Mp3Party => Self::search_tracks(&q_text),
                     DownloadSource::DriveMusic => Self::search_tracks_drivemusic(&q_text),
                     DownloadSource::YtDlp => Self::search_tracks_ytdlp(&q_text),
+                    DownloadSource::PesniMe => Self::search_tracks_pesnime(&q_text),
                 };
                 match result {
                     Ok(mut tracks) => {
@@ -2675,6 +2993,9 @@ impl LinkParserApp {
                 DownloadSource::DriveMusic => {
                     Self::download_track_drivemusic(track.clone(), folder, status, cancel, log_tx);
                 }
+                DownloadSource::PesniMe => {
+                    Self::download_track_pesnime(track.clone(), folder, status, cancel, log_tx);
+                }
                 DownloadSource::YtDlp => {
                     Self::download_track_ytdlp(
                         track.clone(),
@@ -2713,7 +3034,12 @@ impl LinkParserApp {
             (DownloadSource::YtDlp, None) => "YouTube",
             (DownloadSource::Mp3Party, _) => "MP3Party",
             (DownloadSource::DriveMusic, _) => "DriveMusic",
+            (DownloadSource::PesniMe, _) => "Pesni.me",
         }
+    }
+
+    fn unescape_json(s: &str) -> String {
+        s.replace("\\\"", "\"").replace("\\n", "\n").replace("\\t", "\t")
     }
 
     fn format_bytes(b: u64) -> String {
@@ -3246,6 +3572,11 @@ impl LinkParserApp {
                             DownloadSource::YtDlp,
                             DownloadSource::YtDlp.label(),
                         );
+                        ui.selectable_value(
+                            &mut self.download_source,
+                            DownloadSource::PesniMe,
+                            DownloadSource::PesniMe.label(),
+                        );
                     });
             });
             if self.download_source == DownloadSource::YtDlp {
@@ -3278,6 +3609,9 @@ impl LinkParserApp {
                 DownloadSource::Mp3Party => "Поиск на mp3party.net, скачивание online/download URL",
                 DownloadSource::DriveMusic => {
                     "Поиск на drivemusic.me; ссылки на MP3 временные — скачивание со страницы трека"
+                }
+                DownloadSource::PesniMe => {
+                    "Поиск на pesni.me, скачивание MP3 со страницы трека"
                 }
                 DownloadSource::YtDlp => match self.ytdlp_format {
                     YtDlpFormat::Mp3 => {
@@ -3324,6 +3658,7 @@ impl LinkParserApp {
                     let search_title = match self.download_source {
                         DownloadSource::Mp3Party => "🔎 Поиск (MP3Party)",
                         DownloadSource::DriveMusic => "🔎 Поиск (DriveMusic)",
+                        DownloadSource::PesniMe => "🔎 Поиск (Pesni.me)",
                         DownloadSource::YtDlp => "🔎 Поиск (YouTube)",
                     };
                     ui.label(theme.section_title(search_title));
@@ -3331,6 +3666,7 @@ impl LinkParserApp {
                     let search_hint = match self.download_source {
                         DownloadSource::Mp3Party => "Исполнитель или название на mp3party",
                         DownloadSource::DriveMusic => "Исполнитель или название на drivemusic",
+                        DownloadSource::PesniMe => "Исполнитель или название на pesni.me",
                         DownloadSource::YtDlp => "Запрос для поиска на YouTube",
                     };
                     ui.label(
@@ -3344,6 +3680,7 @@ impl LinkParserApp {
                         let placeholder = match self.download_source {
                             DownloadSource::Mp3Party => "Queen, Кино…",
                             DownloadSource::DriveMusic => "Исполнитель или название…",
+                            DownloadSource::PesniMe => "Queen, Кино…",
                             DownloadSource::YtDlp => "Queen Killer Queen…",
                         };
                         let search_resp = ui.add_sized(
@@ -3919,6 +4256,16 @@ impl LinkParserApp {
                                             {
                                                 Self::open_external_url(&page);
                                             }
+                                        }
+                                    }
+                                    if task.source == DownloadSource::PesniMe {
+                                        let page = Self::pesnime_track_url(&track.id);
+                                        if ui
+                                            .add(theme.neutral_button("🌐 Браузер"))
+                                            .on_hover_text("Открыть страницу трека")
+                                            .clicked()
+                                        {
+                                            Self::open_external_url(&page);
                                         }
                                     }
                                     if ui.small_button("✕").clicked() {

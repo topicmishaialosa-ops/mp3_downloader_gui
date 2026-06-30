@@ -76,6 +76,7 @@ class TrackAdapter(
             val src = when (track.source) {
                 DownloadSource.MP3Party -> "MP3Party"
                 DownloadSource.DriveMusic -> "DriveMusic"
+                DownloadSource.PesniMe -> "Pesni.me"
                 DownloadSource.YouTube -> "YouTube"
             }
             binding.trackId.text = "[$src] ID ${track.id}"
@@ -85,8 +86,8 @@ class TrackAdapter(
                 ?: '?'
             binding.trackInitial.text = initial.uppercaseChar().toString()
 
-            val isYoutube = track.source == DownloadSource.YouTube
-            binding.streamButton.isVisible = isYoutube
+            val canStream = track.source == DownloadSource.YouTube || track.source == DownloadSource.PesniMe
+            binding.streamButton.isVisible = canStream
 
             val busy = isDownloading || isStreaming
             binding.itemProgress.isVisible = busy

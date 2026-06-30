@@ -55,6 +55,13 @@
                     android:text="DriveMusic" />
 
                 <com.google.android.material.chip.Chip
+                    android:id="@+id/chipPesnime"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Pesni.me" />
+
+                <com.google.android.material.chip.Chip
                     android:id="@+id/chipYoutube"
                     style="@style/Widget.Material3.Chip.Filter"
                     android:layout_width="wrap_content"
