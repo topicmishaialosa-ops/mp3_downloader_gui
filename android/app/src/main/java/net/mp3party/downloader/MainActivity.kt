@@ -1,6 +1,7 @@
 package net.mp3party.downloader
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.ImageButton
 import androidx.appcompat.app.AlertDialog
@@ -71,6 +72,13 @@ class MainActivity : AppCompatActivity() {
                 Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
             }
         }
+
+        handleImpeIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleImpeIntent(intent)
     }
 
     override fun onStart() {
@@ -337,6 +345,116 @@ class MainActivity : AppCompatActivity() {
             }
         }
         startActivity(intent)
+    }
+
+    private fun handleImpeIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        val text = readImpeFile(uri) ?: return
+        val track = parseImpe(text) ?: return
+
+        val activity = this
+        AlertDialog.Builder(activity)
+            .setTitle(R.string.impe_title)
+            .setMessage("${track.artist} — ${track.title}")
+            .setPositiveButton(R.string.impe_download) { _, _ ->
+                lifecycleScope.launch {
+                    showLoading(true, "📥 ${track.artist} — ${track.title}")
+                    try {
+                        if (track.source == DownloadSource.YouTube && !ensureYtDlp()) return@launch
+                        val file = withContext(Dispatchers.IO) {
+                            DownloadHelper.download(activity, track, YtFormat.MP3) { _, _ -> }
+                        }
+                        Snackbar.make(binding.root, "Скачано: ${file.name}", Snackbar.LENGTH_LONG).show()
+                        libraryFragment?.refresh()
+                    } catch (e: Exception) {
+                        Snackbar.make(binding.root, e.message ?: "Ошибка", Snackbar.LENGTH_LONG).show()
+                    } finally {
+                        showLoading(false, "")
+                    }
+                }
+            }
+            .setNeutralButton(R.string.impe_stream) { _, _ ->
+                lifecycleScope.launch {
+                    showLoading(true, "🎧 ${track.artist} — ${track.title}")
+                    try {
+                        val url = withContext(Dispatchers.IO) {
+                            when (track.source) {
+                                DownloadSource.PesniMe -> PesniMeApi.resolveStreamUrl(track)
+                                DownloadSource.YouTube -> YtDlpHelper.getStreamUrl(
+                                    applicationContext, track, YtFormat.MP3)
+                                else -> track.streamUrl.ifEmpty { null }
+                            }
+                        }
+                        if (url == null) {
+                            Snackbar.make(binding.root, "Стрим недоступен", Snackbar.LENGTH_LONG).show()
+                            return@launch
+                        }
+                        PlaybackManager.playStream(activity, url,
+                            "${track.artist} — ${track.title}", track.id, false)
+                        binding.playerBar.root.isVisible = true
+                    } catch (e: Exception) {
+                        Snackbar.make(binding.root, e.message ?: "Ошибка", Snackbar.LENGTH_LONG).show()
+                    } finally {
+                        showLoading(false, "")
+                    }
+                }
+            }
+            .setNegativeButton(R.string.impe_playlist) { _, _ ->
+                val item = PlaylistItem(
+                    pathOrUrl = track.streamUrl,
+                    title = "${track.artist} — ${track.title}",
+                    subtitle = track.source.name,
+                    isVideo = false,
+                    isUrl = track.streamUrl.isNotEmpty(),
+                )
+                PlaybackManager.addToPlaylist(item)
+                Snackbar.make(binding.root, "➕ ${track.artist} — ${track.title}", Snackbar.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun readImpeFile(uri: Uri): String? {
+        return try {
+            contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseImpe(text: String): Track? {
+        val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        var source: String? = null
+        var id: String? = null
+        var artist: String? = ""
+        var title: String? = ""
+        var streamUrl: String? = ""
+        for (line in lines) {
+            val eq = line.indexOf('=')
+            if (eq < 0) continue
+            val key = line.substring(0, eq).trim()
+            val value = line.substring(eq + 1).trim()
+            when (key) {
+                "source" -> source = value
+                "id" -> id = value
+                "artist" -> artist = value
+                "title" -> title = value
+                "url" -> streamUrl = value
+            }
+        }
+        if (id == null) return null
+        val dlSource = when (source) {
+            "YouTube" -> DownloadSource.YouTube
+            "DriveMusic" -> DownloadSource.DriveMusic
+            "PesniMe" -> DownloadSource.PesniMe
+            else -> DownloadSource.MP3Party
+        }
+        return Track(
+            id = id!!,
+            artist = artist.orEmpty(),
+            title = title.orEmpty(),
+            streamUrl = streamUrl.orEmpty(),
+            source = dlSource,
+        )
     }
 
     fun startStream(

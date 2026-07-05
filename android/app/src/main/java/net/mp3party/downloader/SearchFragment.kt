@@ -1,5 +1,6 @@
 package net.mp3party.downloader
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -9,6 +10,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import androidx.core.content.FileProvider
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
@@ -63,6 +65,9 @@ class SearchFragment : Fragment() {
                 )
                 PlaybackManager.addToPlaylist(item)
                 Snackbar.make(binding.root, "➕ $title", Snackbar.LENGTH_SHORT).show()
+            },
+            onShare = { track ->
+                shareTrack(track)
             },
         )
         binding.resultsList.layoutManager = LinearLayoutManager(requireContext())
@@ -324,6 +329,35 @@ class SearchFragment : Fragment() {
         n % 10 == 1 -> "трек"
         n % 10 in 2..4 -> "трека"
         else -> "треков"
+    }
+
+    private fun shareTrack(track: Track) {
+        val impe = buildString {
+            appendLine("source=${track.source.name}")
+            appendLine("id=${track.id}")
+            appendLine("artist=${track.artist}")
+            appendLine("title=${track.title}")
+            appendLine("url=${track.streamUrl}")
+        }
+        try {
+            val dir = java.io.File(requireContext().cacheDir, "impe")
+            dir.mkdirs()
+            val file = java.io.File(dir, "${track.id}.impe")
+            file.writeText(impe)
+            val uri = FileProvider.getUriForFile(
+                requireContext(),
+                "${requireContext().packageName}.fileprovider",
+                file,
+            )
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = "application/octet-stream"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(shareIntent, getString(R.string.share_track)))
+        } catch (_: Exception) {
+            Snackbar.make(binding.root, "Не удалось поделиться", Snackbar.LENGTH_SHORT).show()
+        }
     }
 
     fun refreshPlaybackButtons() {
