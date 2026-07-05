@@ -4731,6 +4731,7 @@ impl LinkParserApp {
     }
 
     fn import_from_url(url: &str) -> Option<(TrackInfo, DownloadSource)> {
+        // 1. YouTube
         if let Some(caps) = RE_YOUTUBE.captures(url) {
             let id = caps.get(1).unwrap().as_str().to_string();
             let track = TrackInfo {
@@ -4742,32 +4743,39 @@ impl LinkParserApp {
             return Some((track, DownloadSource::YtDlp));
         }
 
-        if url.contains("mp3party.net") || url.contains("/download/") || url.contains("/music/") {
-            if let Some(id) = Self::extract_id(url) {
+        // 2. Ищем ID mp3party/pesni.me в URL
+        if let Some(id) = Self::extract_id(url) {
+            if url.contains("mp3party.net") || url.contains("pesni.me") {
+                if url.contains("pesni.me") {
+                    if let Ok(track) = Self::fetch_track_info_pesnime(&id) {
+                        return Some((track, DownloadSource::PesniMe));
+                    }
+                }
                 if let Ok(track) = Self::fetch_track_info(&id) {
                     return Some((track, DownloadSource::Mp3Party));
                 }
             }
-            if url.ends_with(".mp3") {
-                let name = url.rsplit('/').next().unwrap_or("track");
-                let track = TrackInfo {
-                    id: url.to_string(),
-                    artist: String::new(),
-                    title: name.trim_end_matches(".mp3").to_string(),
-                    url: url.to_string(),
-                };
-                return Some((track, DownloadSource::Mp3Party));
-            }
         }
 
-        if url.contains("pesni.me") {
-            if let Some(id) = Self::extract_id(url) {
-                if let Ok(track) = Self::fetch_track_info_pesnime(&id) {
-                    return Some((track, DownloadSource::PesniMe));
-                }
-            }
+        // 3. Прямая .mp3 ссылка
+        if url.ends_with(".mp3") {
+            let name = url.rsplit('/').next().unwrap_or("track");
+            let clean = name.trim_end_matches(".mp3").replace('_', " ").replace('-', " ").trim().to_string();
+            let (artist, title) = if let Some(dash) = clean.find("  ") {
+                (clean[..dash].trim().to_string(), clean[dash + 2..].trim().to_string())
+            } else {
+                (String::new(), clean)
+            };
+            let track = TrackInfo {
+                id: url.to_string(),
+                artist,
+                title: if title.is_empty() { name.to_string() } else { title },
+                url: url.to_string(),
+            };
+            return Some((track, DownloadSource::Mp3Party));
         }
 
+        // 4. .impe — GET + разбор
         let client = reqwest::blocking::Client::new();
         match client.get(url).send() {
             Ok(resp) => resp.text().ok().and_then(|text| parse_impe(&text)),

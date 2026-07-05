@@ -742,72 +742,14 @@ static Track fetchUrlToTrack(const QString &url, QString *error) {
         return t;
     }
 
-    // 2. MP3Party
-    if (url.contains(QStringLiteral("mp3party.net")) || url.contains(QStringLiteral("/download/")) || url.contains(QStringLiteral("/music/"))) {
-        static const QRegularExpression idRe(
-            QStringLiteral("(?:/download/|/music/|/track/)(\\d+)|(?:^|/)(\\d+)/?$"));
-        auto idM = idRe.match(url);
-        if (idM.hasMatch()) {
-            const QString id = idM.captured(1).isEmpty() ? idM.captured(2) : idM.captured(1);
-            const QString pageUrl = QStringLiteral("https://mp3party.net/music/") + id;
-
-            QNetworkAccessManager nam;
-            QEventLoop loop;
-            QTimer timer;
-            timer.setSingleShot(true);
-            QNetworkRequest req(pageUrl);
-            req.setRawHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
-            QNetworkReply *reply = nam.get(req);
-            QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
-            QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
-            timer.start(10000);
-            loop.exec();
-
-            if (timer.isActive() && reply->error() == QNetworkReply::NoError) {
-                const QString body = QString::fromUtf8(reply->readAll());
-                reply->deleteLater();
-
-                t.id = id;
-                t.source = DownloadSource::Mp3Party;
-                t.url = QStringLiteral("https://dl2.mp3party.net/online/") + id + QStringLiteral(".mp3");
-
-                static const QRegularExpression artistRe(
-                    QStringLiteral("data-js-artist-name=\"([^\"]*)\""),
-                    QRegularExpression::DotMatchesEverythingOption);
-                static const QRegularExpression titleRe(
-                    QStringLiteral("data-js-song-title=\"([^\"]*)\""),
-                    QRegularExpression::DotMatchesEverythingOption);
-                auto aM = artistRe.match(body);
-                auto tiM = titleRe.match(body);
-                t.artist = aM.hasMatch() ? aM.captured(1).trimmed() : QString();
-                t.title = tiM.hasMatch() ? tiM.captured(1).trimmed() : QString();
-
-                if (!t.title.isEmpty()) {
-                    return t;
-                }
-            } else {
-                reply->deleteLater();
-            }
-        }
-        if (url.endsWith(QStringLiteral(".mp3"))) {
-            const QString name = url.section(QLatin1Char('/'), -1);
-            t.id = url;
-            t.title = name.chopped(4);
-            t.url = url;
-            t.source = DownloadSource::Mp3Party;
-            return t;
-        }
-    }
-
-    // 3. Pesni.me
-    if (url.contains(QStringLiteral("pesni.me"))) {
-        static const QRegularExpression idRe(
-            QStringLiteral("(?:/track/|/download/)(\\d+)|(?:^|/)(\\d+)/?$"));
-        auto idM = idRe.match(url);
-        if (idM.hasMatch()) {
-            const QString id = idM.captured(1).isEmpty() ? idM.captured(2) : idM.captured(1);
+    // 2. Ищем ID mp3party/pesni.me в URL
+    static const QRegularExpression idRe(
+        QStringLiteral("(?:/download/|/music/|/track/)(\\d+)|(?:^|/)(\\d+)/?$"));
+    auto idM = idRe.match(url);
+    if (idM.hasMatch()) {
+        const QString id = idM.captured(1).isEmpty() ? idM.captured(2) : idM.captured(1);
+        if (url.contains(QStringLiteral("pesni.me"))) {
             const QString pageUrl = QStringLiteral("https://music.pesni.me/track/") + id;
-
             QNetworkAccessManager nam;
             QEventLoop loop;
             QTimer timer;
@@ -819,11 +761,9 @@ static Track fetchUrlToTrack(const QString &url, QString *error) {
             QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
             timer.start(10000);
             loop.exec();
-
             if (timer.isActive() && reply->error() == QNetworkReply::NoError) {
                 const QString body = QString::fromUtf8(reply->readAll());
                 reply->deleteLater();
-
                 static const QRegularExpression trackRe(
                     QStringLiteral("\"id\":(\\d+),\"artist\":\"([^\"]*)\",\"title\":\"([^\"]*)\","
                                    "\"version\":\"[^\"]*\",\"duration\":(\\d+),"
@@ -842,19 +782,60 @@ static Track fetchUrlToTrack(const QString &url, QString *error) {
                 reply->deleteLater();
             }
         }
+        if (url.contains(QStringLiteral("mp3party.net")) || url.contains(QStringLiteral("mp3party"))) {
+            const QString pageUrl = QStringLiteral("https://mp3party.net/music/") + id;
+            QNetworkAccessManager nam;
+            QEventLoop loop;
+            QTimer timer;
+            timer.setSingleShot(true);
+            QNetworkRequest req(pageUrl);
+            req.setRawHeader("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+            QNetworkReply *reply = nam.get(req);
+            QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+            QObject::connect(&timer, &QTimer::timeout, &loop, &QEventLoop::quit);
+            timer.start(10000);
+            loop.exec();
+            if (timer.isActive() && reply->error() == QNetworkReply::NoError) {
+                const QString body = QString::fromUtf8(reply->readAll());
+                reply->deleteLater();
+                t.id = id;
+                t.source = DownloadSource::Mp3Party;
+                t.url = QStringLiteral("https://dl2.mp3party.net/online/") + id + QStringLiteral(".mp3");
+                static const QRegularExpression artistRe(
+                    QStringLiteral("data-js-artist-name=\"([^\"]*)\""),
+                    QRegularExpression::DotMatchesEverythingOption);
+                static const QRegularExpression titleRe(
+                    QStringLiteral("data-js-song-title=\"([^\"]*)\""),
+                    QRegularExpression::DotMatchesEverythingOption);
+                auto aM = artistRe.match(body);
+                auto tiM = titleRe.match(body);
+                t.artist = aM.hasMatch() ? aM.captured(1).trimmed() : QString();
+                t.title = tiM.hasMatch() ? tiM.captured(1).trimmed() : QString();
+                if (!t.title.isEmpty()) {
+                    return t;
+                }
+            } else {
+                reply->deleteLater();
+            }
+        }
     }
 
-    // 4. Direct MP3 URL
+    // 3. Прямая .mp3 ссылка
     if (url.endsWith(QStringLiteral(".mp3"))) {
-        const QString name = url.section(QLatin1Char('/'), -1);
+        QString name = url.section(QLatin1Char('/'), -1);
+        if (name.endsWith(QStringLiteral(".mp3"))) name.chop(4);
+        name.replace(QLatin1Char('_'), QLatin1Char(' ')).replace(QLatin1Char('-'), QLatin1Char(' '));
+        const int dd = name.indexOf(QStringLiteral("  "));
         t.id = url;
-        t.title = name.chopped(4);
+        t.artist = dd >= 0 ? name.left(dd).trimmed() : QString();
+        t.title = dd >= 0 ? name.mid(dd + 2).trimmed() : name.trimmed();
+        if (t.title.isEmpty()) t.title = url.section(QLatin1Char('/'), -1);
         t.url = url;
-        t.source = DownloadSource::Local;
+        t.source = DownloadSource::Mp3Party;
         return t;
     }
 
-    if (error) *error = QStringLiteral("Не удалось определить тип ссылки");
+    if (error) *error = QStringLiteral("Не удалось определить тип ссылки. Попробуйте .impe.");
     return t;
 }
 

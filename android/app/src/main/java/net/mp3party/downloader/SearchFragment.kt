@@ -459,61 +459,63 @@ class SearchFragment : Fragment() {
                 streamUrl = "https://www.youtube.com/watch?v=$id", source = DownloadSource.YouTube)
         }
 
-        if (url.contains("mp3party.net") || url.contains("/download/") || url.contains("/music/")) {
-            val idRe = Regex("(?:/download/|/music/|/track/)(\\d+)|(?:^|/)(\\d+)/?\$")
-            val idM = idRe.find(url)
-            if (idM != null) {
-                val id = idM.groupValues[1].ifEmpty { idM.groupValues[2] }
-                val client = okhttp3.OkHttpClient()
-                val pageUrl = "https://mp3party.net/music/$id"
-                val req = okhttp3.Request.Builder().url(pageUrl)
-                    .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
-                    .build()
-                val resp = client.newCall(req).execute()
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string() ?: return null
-                    val artistRe = Regex("""data-js-artist-name="([^"]*)"""")
-                    val titleRe = Regex("""data-js-song-title="([^"]*)"""")
-                    val artist = artistRe.find(body)?.groupValues?.getOrNull(1)?.trim() ?: ""
-                    val title = titleRe.find(body)?.groupValues?.getOrNull(1)?.trim() ?: "Track #$id"
-                    return Track(id = id, artist = artist, title = title,
-                        streamUrl = "https://dl2.mp3party.net/online/$id.mp3", source = DownloadSource.MP3Party)
-                }
-            }
-        }
-
-        if (url.contains("pesni.me")) {
-            val idRe = Regex("(?:/track/|/download/)(\\d+)|(?:^|/)(\\d+)/?\$")
-            val idM = idRe.find(url)
-            if (idM != null) {
-                val id = idM.groupValues[1].ifEmpty { idM.groupValues[2] }
+        val idRe = Regex("(?:/download/|/music/|/track/)(\\d+)|(?:^|/)(\\d+)/?\$")
+        val idM = idRe.find(url)
+        if (idM != null) {
+            val id = idM.groupValues[1].ifEmpty { idM.groupValues[2] }
+            if (url.contains("pesni.me")) {
                 val client = okhttp3.OkHttpClient()
                 val pageUrl = "https://music.pesni.me/track/$id"
                 val req = okhttp3.Request.Builder().url(pageUrl)
                     .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
                     .build()
-                val resp = client.newCall(req).execute()
-                if (resp.isSuccessful) {
-                    val body = resp.body?.string() ?: return null
-                    val trackRe = Regex(
-                        "\"id\":(\\d+),\"artist\":\"([^\"]*)\",\"title\":\"([^\"]*)\",")
-                    val trM = trackRe.find(body)
-                    if (trM != null) {
-                        val artist = trM.groupValues[2].trim()
-                        val title = trM.groupValues[3].trim()
-                        val playRe = Regex("\"play\":\"([^\"]+)\"")
-                        val playM = playRe.find(body)
-                        val streamUrl = playM?.groupValues?.getOrNull(1) ?: ""
-                        return Track(id = id, artist = artist, title = title,
-                            streamUrl = streamUrl, source = DownloadSource.PesniMe)
+                try {
+                    val resp = client.newCall(req).execute()
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: return null
+                        val trackRe = Regex("\"id\":(\\d+),\"artist\":\"([^\"]*)\",\"title\":\"([^\"]*)\",")
+                        val trM = trackRe.find(body)
+                        if (trM != null) {
+                            val artist = trM.groupValues[2].trim()
+                            val title = trM.groupValues[3].trim()
+                            val playRe = Regex("\"play\":\"([^\"]+)\"")
+                            val playM = playRe.find(body)
+                            val streamUrl = playM?.groupValues?.getOrNull(1) ?: ""
+                            return Track(id = id, artist = artist, title = title,
+                                streamUrl = streamUrl, source = DownloadSource.PesniMe)
+                        }
                     }
-                }
+                } catch (_: Exception) { }
+            }
+            if (url.contains("mp3party.net")) {
+                val client = okhttp3.OkHttpClient()
+                val pageUrl = "https://mp3party.net/music/$id"
+                val req = okhttp3.Request.Builder().url(pageUrl)
+                    .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+                    .build()
+                try {
+                    val resp = client.newCall(req).execute()
+                    if (resp.isSuccessful) {
+                        val body = resp.body?.string() ?: return null
+                        val artistRe = Regex("""data-js-artist-name="([^"]*)"""")
+                        val titleRe = Regex("""data-js-song-title="([^"]*)"""")
+                        val artist = artistRe.find(body)?.groupValues?.getOrNull(1)?.trim() ?: ""
+                        val title = titleRe.find(body)?.groupValues?.getOrNull(1)?.trim() ?: "Track #$id"
+                        return Track(id = id, artist = artist, title = title,
+                            streamUrl = "https://dl2.mp3party.net/online/$id.mp3", source = DownloadSource.MP3Party)
+                    }
+                } catch (_: Exception) { }
             }
         }
 
         if (url.endsWith(".mp3")) {
             val name = url.substringAfterLast('/')
-            return Track(id = url, artist = "", title = name.removeSuffix(".mp3"),
+            val clean = name.removeSuffix(".mp3").replace('_', ' ').replace('-', ' ')
+            val dd = clean.indexOf("  ")
+            val artist = if (dd >= 0) clean.substring(0, dd).trim() else ""
+            val title = if (dd >= 0) clean.substring(dd + 2).trim() else clean.trim()
+            return Track(id = url, artist = artist,
+                title = title.ifEmpty { name },
                 streamUrl = url, source = DownloadSource.MP3Party)
         }
 
