@@ -4743,10 +4743,12 @@ impl LinkParserApp {
             return Some((track, DownloadSource::YtDlp));
         }
 
-        // 2. Ищем ID mp3party/pesni.me в URL
+        // 2. Ищем ID mp3party/pesni в URL
         if let Some(id) = Self::extract_id(url) {
-            if url.contains("mp3party.net") || url.contains("pesni.me") {
-                if url.contains("pesni.me") {
+            let has_pesni = url.contains("pesni");
+            let has_mp3party = url.contains("mp3party");
+            if has_pesni || has_mp3party {
+                if has_pesni {
                     if let Ok(track) = Self::fetch_track_info_pesnime(&id) {
                         return Some((track, DownloadSource::PesniMe));
                     }
@@ -4766,13 +4768,14 @@ impl LinkParserApp {
             } else {
                 (String::new(), clean)
             };
+            let source = if url.contains("pesni") { DownloadSource::PesniMe } else { DownloadSource::Mp3Party };
             let track = TrackInfo {
                 id: url.to_string(),
                 artist,
                 title: if title.is_empty() { name.to_string() } else { title },
                 url: url.to_string(),
             };
-            return Some((track, DownloadSource::Mp3Party));
+            return Some((track, source));
         }
 
         // 4. .impe — GET + разбор

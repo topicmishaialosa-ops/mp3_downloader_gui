@@ -463,7 +463,7 @@ class SearchFragment : Fragment() {
         val idM = idRe.find(url)
         if (idM != null) {
             val id = idM.groupValues[1].ifEmpty { idM.groupValues[2] }
-            if (url.contains("pesni.me")) {
+            if (url.contains("pesni")) {
                 val client = okhttp3.OkHttpClient()
                 val pageUrl = "https://music.pesni.me/track/$id"
                 val req = okhttp3.Request.Builder().url(pageUrl)
@@ -487,7 +487,7 @@ class SearchFragment : Fragment() {
                     }
                 } catch (_: Exception) { }
             }
-            if (url.contains("mp3party.net")) {
+            if (url.contains("mp3party")) {
                 val client = okhttp3.OkHttpClient()
                 val pageUrl = "https://mp3party.net/music/$id"
                 val req = okhttp3.Request.Builder().url(pageUrl)
@@ -514,9 +514,10 @@ class SearchFragment : Fragment() {
             val dd = clean.indexOf("  ")
             val artist = if (dd >= 0) clean.substring(0, dd).trim() else ""
             val title = if (dd >= 0) clean.substring(dd + 2).trim() else clean.trim()
+            val source = if (url.contains("pesni")) DownloadSource.PesniMe else DownloadSource.MP3Party
             return Track(id = url, artist = artist,
                 title = title.ifEmpty { name },
-                streamUrl = url, source = DownloadSource.MP3Party)
+                streamUrl = url, source = source)
         }
 
         return null

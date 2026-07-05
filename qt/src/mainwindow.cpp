@@ -742,13 +742,13 @@ static Track fetchUrlToTrack(const QString &url, QString *error) {
         return t;
     }
 
-    // 2. Ищем ID mp3party/pesni.me в URL
+    // 2. Ищем ID mp3party/pesni в URL
     static const QRegularExpression idRe(
         QStringLiteral("(?:/download/|/music/|/track/)(\\d+)|(?:^|/)(\\d+)/?$"));
     auto idM = idRe.match(url);
     if (idM.hasMatch()) {
         const QString id = idM.captured(1).isEmpty() ? idM.captured(2) : idM.captured(1);
-        if (url.contains(QStringLiteral("pesni.me"))) {
+        if (url.contains(QStringLiteral("pesni"))) {
             const QString pageUrl = QStringLiteral("https://music.pesni.me/track/") + id;
             QNetworkAccessManager nam;
             QEventLoop loop;
@@ -782,7 +782,7 @@ static Track fetchUrlToTrack(const QString &url, QString *error) {
                 reply->deleteLater();
             }
         }
-        if (url.contains(QStringLiteral("mp3party.net")) || url.contains(QStringLiteral("mp3party"))) {
+        if (url.contains(QStringLiteral("mp3party"))) {
             const QString pageUrl = QStringLiteral("https://mp3party.net/music/") + id;
             QNetworkAccessManager nam;
             QEventLoop loop;
@@ -831,7 +831,7 @@ static Track fetchUrlToTrack(const QString &url, QString *error) {
         t.title = dd >= 0 ? name.mid(dd + 2).trimmed() : name.trimmed();
         if (t.title.isEmpty()) t.title = url.section(QLatin1Char('/'), -1);
         t.url = url;
-        t.source = DownloadSource::Mp3Party;
+        t.source = url.contains(QStringLiteral("pesni")) ? DownloadSource::PesniMe : DownloadSource::Mp3Party;
         return t;
     }
 
