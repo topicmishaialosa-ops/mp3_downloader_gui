@@ -18,6 +18,7 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -113,7 +114,7 @@ class SearchFragment : Fragment() {
 
         binding.importLinksButton.setOnClickListener { openImportLinksDialog() }
 
-        binding.saveImpeButton.setOnClickListener { saveImpeFiles() }
+        binding.saveAllImpeButton.setOnClickListener { saveImpeFiles() }
 
         updateYtdlpStatus()
         updateEmptyState(show = true, hasResults = false)
@@ -425,18 +426,19 @@ class SearchFragment : Fragment() {
             }
             if (tracks.isEmpty()) {
                 Snackbar.make(binding.root, "Не удалось распознать ссылки", Snackbar.LENGTH_SHORT).show()
-            return
+                return@launch
+            }
+            adapter.submit(tracks)
+            updateEmptyState(show = false, hasResults = true)
+            binding.statusText.text = "✅ Импортировано ${tracks.size} ссылок"
         }
-        adapter.submit(tracks)
-        updateEmptyState(show = false, hasResults = true)
-        binding.statusText.text = "✅ Импортировано ${tracks.size} ссылок"
     }
 
     private fun updateEmptyState(show: Boolean, hasResults: Boolean) {
         binding.emptyState.root.isVisible = show && !hasResults
         binding.resultsList.isVisible = hasResults
         binding.downloadAllButton.isVisible = hasResults
-        binding.saveImpeButton.isVisible = hasResults
+        binding.saveAllImpeButton.isVisible = hasResults
     }
 
     private fun saveImpeFiles() {
@@ -455,7 +457,8 @@ class SearchFragment : Fragment() {
             }
             val fname = "${t.artist.replace(' ', '_')}_${t.title.replace(' ', '_')}.impe"
             val file = java.io.File(dir, fname)
-            if (file.writeText(impe); true) saved++
+            file.writeText(impe)
+            saved++
         }
         Snackbar.make(binding.root, "💾 Сохранено .impe: $saved в ${dir.absolutePath}", Snackbar.LENGTH_LONG).show()
     }
