@@ -347,11 +347,18 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
-    private fun handleImpeIntent(intent: Intent?) {
-        val uri = intent?.data ?: return
+    fun handleImpeUri(uri: Uri) {
         val text = readImpeFile(uri) ?: return
         val track = parseImpe(text) ?: return
+        showImpeDialog(track)
+    }
 
+    private fun handleImpeIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        handleImpeUri(uri)
+    }
+
+    fun showImpeDialog(track: Track) {
         val activity = this
         AlertDialog.Builder(activity)
             .setTitle(R.string.impe_title)

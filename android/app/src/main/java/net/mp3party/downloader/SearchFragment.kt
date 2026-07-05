@@ -1,6 +1,7 @@
 package net.mp3party.downloader
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -10,6 +11,7 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
@@ -97,6 +99,14 @@ class SearchFragment : Fragment() {
         }
 
         binding.batchButton.setOnClickListener { openBatchDialog() }
+
+        val impePicker = registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            uri ?: return@registerForActivityResult
+            (activity as? MainActivity)?.handleImpeUri(uri)
+        }
+        binding.impeButton.setOnClickListener {
+            impePicker.launch("*/*")
+        }
 
         updateYtdlpStatus()
         updateEmptyState(show = true, hasResults = false)

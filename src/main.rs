@@ -134,6 +134,25 @@ impl DownloadSource {
             DownloadSource::PesniMe => "Pesni.me",
         }
     }
+
+    fn impe_name(self) -> &'static str {
+        match self {
+            DownloadSource::Mp3Party => "MP3Party",
+            DownloadSource::DriveMusic => "DriveMusic",
+            DownloadSource::YtDlp => "YouTube",
+            DownloadSource::PesniMe => "PesniMe",
+        }
+    }
+
+    fn from_impe_name(s: &str) -> Option<Self> {
+        match s {
+            "MP3Party" => Some(DownloadSource::Mp3Party),
+            "DriveMusic" => Some(DownloadSource::DriveMusic),
+            "YouTube" => Some(DownloadSource::YtDlp),
+            "PesniMe" => Some(DownloadSource::PesniMe),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -401,6 +420,8 @@ struct LinkParserApp {
     player_volume_request: Option<f32>,
     show_playlist_window: bool,
     stream_rx: Option<mpsc::Receiver<Result<(String, String, String, bool), String>>>,
+    impe_to_handle: Option<(TrackInfo, DownloadSource)>,
+    impe_file_path: Option<PathBuf>,
 }
 
 impl Default for LinkParserApp {
@@ -441,6 +462,8 @@ impl Default for LinkParserApp {
             player_volume_request: None,
             show_playlist_window: false,
             stream_rx: None,
+            impe_to_handle: None,
+            impe_file_path: None,
         }
     }
 }
@@ -1552,6 +1575,22 @@ impl LinkParserApp {
                                 };
                                 self.player.add_to_playlist(item);
                                 self.status = format!("➕ {} добавлен в плейлист", f.display_name);
+                            }
+                            if ui.add(theme.neutral_button("🔗")).on_hover_text("Поделиться (.impe)").clicked() {
+                                let name = f.display_name.clone();
+                                let path = f.path.to_string_lossy().to_string();
+                                let impe = format!(
+                                    "source=Local\nid=\nartist=\ntitle={}\nurl=file://{}\n",
+                                    name, path
+                                );
+                                let out = self.downloads_folder.join(format!("{}.impe", name));
+                                if std::fs::write(&out, &impe).is_ok() {
+                                    self.impe_file_path = Some(out.clone());
+                                    self.status = format!("📁 .impe сохранён: {}", out.display());
+                                    let _ = std::process::Command::new("xdg-open")
+                                        .arg(out.parent().unwrap_or(Path::new(".")))
+                                        .spawn();
+                                }
                             }
                         });
                         ui.separator();
@@ -3152,24 +3191,25 @@ impl LinkParserApp {
                     .color(theme.text_primary),
                 );
 
+                let bar_height = 22.0;
                 match prog {
                     None => {
-                        ui.add(
+                        ui.add_sized(
+                            egui::vec2(ui.available_width(), bar_height),
                             egui::ProgressBar::new(0.0)
                                 .animate(true)
-                                .text("⏳ Подготовка…")
-                                .desired_width(ui.available_width()),
+                                .text("⏳ Подготовка…"),
                         );
                     }
                     Some((progress, bytes, total)) => {
                         if *total > 0 {
                             total_bytes += bytes;
                             total_size += total;
-                            ui.add(
+                            ui.add_sized(
+                                egui::vec2(ui.available_width(), bar_height),
                                 egui::ProgressBar::new(*progress)
                                     .show_percentage()
                                     .fill(theme.progress)
-                                    .desired_width(ui.available_width())
                                     .text(format!(
                                         "{} / {}",
                                         Self::format_bytes(*bytes),
@@ -3178,11 +3218,10 @@ impl LinkParserApp {
                             );
                         } else {
                             total_bytes += bytes;
-                            ui.add(
-                                egui::ProgressBar::new(0.0)
-                                    .animate(true)
+                                        ui.add_sized(
+                                            egui::vec2(ui.available_width(), bar_height),
+                                            egui::ProgressBar::new((*progress).max(0.01))
                                     .fill(theme.progress)
-                                    .desired_width(ui.available_width())
                                     .text(format!("{} скачано", Self::format_bytes(*bytes))),
                             );
                         }
@@ -3199,11 +3238,11 @@ impl LinkParserApp {
                         .size(11.0)
                         .color(theme.text_muted),
                 );
-                ui.add(
+                ui.add_sized(
+                    egui::vec2(ui.available_width(), 26.0),
                     egui::ProgressBar::new(overall.min(1.0))
                         .show_percentage()
                         .fill(theme.accent)
-                        .desired_width(ui.available_width())
                         .text(format!(
                             "{} / {}",
                             Self::format_bytes(total_bytes),
@@ -3430,6 +3469,24 @@ impl eframe::App for LinkParserApp {
                 )
                 .show(ctx, |ui| {
                     self.show_playlist_panel(ui, theme);
+                });
+        }
+
+        if let Some((ref track, _src)) = self.impe_to_handle.clone() {
+            let title_text = format!("📂 .impe — {} — {}", track.artist, track.title);
+            egui::Window::new(&title_text)
+                .id("impe_window".into())
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .resizable(false)
+                .collapsible(false)
+                .frame(
+                    Frame::window(&ctx.style())
+                        .fill(theme.card_bg)
+                        .stroke(Stroke::new(1.0, theme.card_border))
+                        .rounding(Rounding::same(10.0)),
+                )
+                .show(ctx, |ui| {
+                    self.show_impe_panel(ui, theme);
                 });
         }
 
@@ -3744,6 +3801,24 @@ impl LinkParserApp {
                     {
                         self.show_batch_window = true;
                     }
+
+                    if ui.add(theme.neutral_button("📂 .impe")).on_hover_text("Импортировать .impe файл").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Выберите .impe файл")
+                            .add_filter("IMPE", &["impe"])
+                            .pick_file()
+                        {
+                            if let Ok(text) = std::fs::read_to_string(&path) {
+                                if let Some(parsed) = parse_impe(&text) {
+                                    self.impe_to_handle = Some(parsed);
+                                } else {
+                                    self.status = "❌ Не удалось разобрать .impe файл".into();
+                                }
+                            } else {
+                                self.status = "❌ Не удалось прочитать файл".into();
+                            }
+                        }
+                    }
                 });
             });
         });
@@ -4003,6 +4078,29 @@ impl LinkParserApp {
                                             self.player.add_to_playlist(item);
                                             self.status = format!("➕ {} добавлен в плейлист", track.title);
                                         }
+                                        if ui
+                                            .add(
+                                                theme
+                                                    .neutral_button("🔗")
+                                                    .min_size(Vec2::new(36.0, 24.0)),
+                                            )
+                                            .on_hover_text("Поделиться (.impe)")
+                                            .clicked()
+                                        {
+                                            let track = &self.tracks[*i];
+                                            match write_impe_file(track, self.download_source) {
+                                                Ok(path) => {
+                                                    self.impe_file_path = Some(path.clone());
+                                                    self.status = format!("📁 .impe сохранён: {}", path.display());
+                                                    let _ = std::process::Command::new("xdg-open")
+                                                        .arg(path.parent().unwrap_or(Path::new(".")))
+                                                        .spawn();
+                                                }
+                                                Err(e) => {
+                                                    self.status = format!("❌ .impe: {}", e);
+                                                }
+                                            }
+                                        }
                                     });
 
                                     if ui.small_button("✕").on_hover_text("Убрать").clicked()
@@ -4176,17 +4274,18 @@ impl LinkParserApp {
 
                         ui.add_space(6.0);
 
+                        let bar_height = 22.0;
                         match &status {
                             DownloadStatus::Pending => {
                                 ui.horizontal(|ui| {
-                                    ui.add(
+                                    ui.add_sized(
+                                        egui::vec2(ui.available_width() - 70.0, bar_height),
                                         egui::ProgressBar::new(0.0)
                                             .animate(true)
-                                            .text("⏳ Ожидание…")
-                                            .desired_width(ui.available_width() - 90.0),
+                                            .text("⏳ Ожидание…"),
                                     );
                                     if ui
-                                        .add(theme.neutral_button("⏹ Стоп"))
+                                        .add(theme.neutral_button("⏹"))
                                         .on_hover_text("Принудительно остановить")
                                         .clicked()
                                     {
@@ -4201,25 +4300,22 @@ impl LinkParserApp {
                             } => {
                                 ui.horizontal(|ui| {
                                     if *total > 0 {
-                                        let pct = (progress * 100.0) as u32;
-                                        ui.add(
+                                        ui.add_sized(
+                                            egui::vec2(ui.available_width() - 70.0, bar_height),
                                             egui::ProgressBar::new(*progress)
                                                 .show_percentage()
-                                                .desired_width(ui.available_width() - 90.0)
                                                 .fill(theme.progress)
                                                 .text(format!(
-                                                    "{} / {} ({}%)",
+                                                    "{} / {}",
                                                     Self::format_bytes(*bytes),
-                                                    Self::format_bytes(*total),
-                                                    pct
+                                                    Self::format_bytes(*total)
                                                 )),
                                         );
                                     } else {
-                                        ui.add(
-                                            egui::ProgressBar::new(*progress)
-                                                .animate(*progress < 0.01)
+                                        ui.add_sized(
+                                            egui::vec2(ui.available_width() - 70.0, bar_height),
+                                            egui::ProgressBar::new(progress.max(0.01))
                                                 .fill(theme.progress)
-                                                .desired_width(ui.available_width() - 90.0)
                                                 .text(format!(
                                                     "{} скачано",
                                                     Self::format_bytes(*bytes)
@@ -4227,7 +4323,7 @@ impl LinkParserApp {
                                         );
                                     }
                                     if ui
-                                        .add(theme.neutral_button("⏹ Стоп"))
+                                        .add(theme.neutral_button("⏹"))
                                         .on_hover_text("Принудительно остановить")
                                         .clicked()
                                     {
@@ -4432,6 +4528,154 @@ impl LinkParserApp {
                 }
             });
     }
+
+    fn show_impe_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        let (track, source) = self.impe_to_handle.as_ref().unwrap().clone();
+        let label = format!("{} — {}", track.artist, track.title);
+        ui.label(egui::RichText::new(&label).size(16.0).strong());
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(format!("Источник: {}", source.label())).size(12.0).color(theme.text_muted));
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if ui.add(theme.success_button("📥 Скачать")).clicked() {
+                let src = source;
+                let t = track.clone();
+                if src == DownloadSource::YtDlp {
+                    if let Err(err) = Self::require_yt_dlp_ui() {
+                        self.status = format!("❌ {}", err);
+                        return;
+                    }
+                }
+                let folder = self.downloads_folder.clone();
+                let fmt = self.ytdlp_format;
+                let id = self.next_download_id;
+                self.next_download_id += 1;
+                let status = Arc::new(Mutex::new(DownloadStatus::Pending));
+                let cancel = Arc::new(AtomicBool::new(false));
+                let child_pid = Arc::new(Mutex::new(None));
+                self.download_tasks.push(DownloadTask {
+                    _id: id,
+                    track: t.clone(),
+                    source: src,
+                    ytdlp_format: if src == DownloadSource::YtDlp { Some(fmt) } else { None },
+                    status: status.clone(),
+                    cancel: cancel.clone(),
+                    child_pid: child_pid.clone(),
+                });
+                self.status = format!("⏳ Загрузка: {}", t.title);
+                let log_tx = self.log_tx.clone();
+                match src {
+                    DownloadSource::Mp3Party => Self::download_track_mp3party(t, folder, status, cancel, log_tx),
+                    DownloadSource::DriveMusic => Self::download_track_drivemusic(t, folder, status, cancel, log_tx),
+                    DownloadSource::PesniMe => Self::download_track_pesnime(t, folder, status, cancel, log_tx),
+                    DownloadSource::YtDlp => Self::download_track_ytdlp(t, folder, fmt, status, cancel, child_pid, log_tx),
+                }
+                self.show_downloads = true;
+                self.impe_to_handle = None;
+                return;
+            }
+            if ui.add(theme.neutral_button("🎧 Слушать")).clicked() {
+                let src = source;
+                let t = track.clone();
+                if src == DownloadSource::YtDlp {
+                    if let Err(err) = Self::require_yt_dlp_ui() {
+                        self.status = format!("❌ {}", err);
+                        return;
+                    }
+                }
+                if !Self::offer_mpv_ui(true) {
+                    return;
+                }
+                self.status = format!("🎧 Поток: {} — {}", t.artist, t.title);
+                self.loading = true;
+                let (tx, rx) = mpsc::channel();
+                self.stream_rx = Some(rx);
+                let fmt = self.ytdlp_format;
+                thread::spawn(move || {
+                    let result = (|| {
+                        let url = match src {
+                            DownloadSource::Mp3Party => {
+                                if t.url.starts_with("http") { t.url.clone() }
+                                else { format!("https://dl2.mp3party.net/online/{}.mp3", t.id) }
+                            }
+                            DownloadSource::DriveMusic => LinkParserApp::drivemusic_stream_url(&t)?,
+                            DownloadSource::PesniMe => LinkParserApp::pesnime_stream_url(&t)?,
+                            DownloadSource::YtDlp => LinkParserApp::ytdlp_stream_url(&t, fmt)?,
+                        };
+                        let title = format!("{} — {}", t.artist, t.title);
+                        let sub = format!("Стрим {}", src.label());
+                        let is_video = src == DownloadSource::YtDlp && fmt == YtDlpFormat::Mp4;
+                        Ok((url, title, sub, is_video))
+                    })();
+                    let _ = tx.send(result);
+                });
+                self.impe_to_handle = None;
+                return;
+            }
+            if ui.add(theme.neutral_button("➕ В плейлист")).clicked() {
+                let item = PlaylistItem {
+                    path_or_url: track.url.clone(),
+                    title: format!("{} — {}", track.artist, track.title),
+                    subtitle: format!("Стрим {}", source.label()),
+                    is_video: false,
+                    is_url: true,
+                };
+                self.player.add_to_playlist(item);
+                self.status = format!("➕ {} добавлен в плейлист", track.title);
+                self.impe_to_handle = None;
+                return;
+            }
+            if ui.add(theme.neutral_button("✕ Закрыть")).clicked() {
+                self.impe_to_handle = None;
+            }
+        });
+    }
+}
+
+// ═══════════════════════════════════════════
+//  Утилиты .impe
+// ═══════════════════════════════════════════
+
+fn parse_impe(text: &str) -> Option<(TrackInfo, DownloadSource)> {
+    let mut source: Option<String> = None;
+    let mut id: Option<String> = None;
+    let mut artist = String::new();
+    let mut title = String::new();
+    let mut url = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(eq) = line.find('=') {
+            let key = line[..eq].trim();
+            let value = line[eq + 1..].trim();
+            match key {
+                "source" => source = Some(value.to_string()),
+                "id" => id = Some(value.to_string()),
+                "artist" => artist = value.to_string(),
+                "title" => title = value.to_string(),
+                "url" => url = value.to_string(),
+                _ => {}
+            }
+        }
+    }
+    let id = id?;
+    let dl_source = DownloadSource::from_impe_name(source.as_deref()?)?;
+    Some((TrackInfo { id, artist, title, url }, dl_source))
+}
+
+fn write_impe_file(track: &TrackInfo, source: DownloadSource) -> Result<PathBuf, String> {
+    let tmp = std::env::temp_dir();
+    let fname = format!("{}_{}.impe", track.artist.replace(' ', "_"), track.title.replace(' ', "_"));
+    let path = tmp.join(&fname);
+    let content = format!(
+        "source={}\nid={}\nartist={}\ntitle={}\nurl={}\n",
+        source.impe_name(),
+        track.id,
+        track.artist,
+        track.title,
+        track.url,
+    );
+    std::fs::write(&path, &content).map_err(|e| format!("{}", e))?;
+    Ok(path)
 }
 
 // ═══════════════════════════════════════════
@@ -4447,9 +4691,19 @@ fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
 
+    let impe = std::env::args().skip(1).find(|a| a.ends_with(".impe"))
+        .and_then(|path| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            parse_impe(&text)
+        });
+
     eframe::run_native(
         "mp3party_link_parser",
         options,
-        Box::new(|_cc| Ok(Box::new(LinkParserApp::default()))),
+        Box::new(move |_cc| {
+            let mut app = LinkParserApp::default();
+            app.impe_to_handle = impe;
+            Ok(Box::new(app))
+        }),
     )
 }

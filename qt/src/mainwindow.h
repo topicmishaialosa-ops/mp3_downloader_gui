@@ -42,11 +42,19 @@ private slots:
     void onPlayNext();
     void onPlayPrev();
     void onAddToPlaylist();
+    void onShareTracks();
     void onToggleShuffle();
     void onVolumeChanged(int value);
     void onShowPlaylist();
 
     void runBatchQuery(QVector<BatchQuery> queries, int index, bool autodownload = false);
+
+public:
+    void enqueueTracksFromTrack(const Track &track);
+    void startStreamFromTrack(const Track &track);
+    void addToPlaylistFromTrack(const Track &track);
+    static Track parseImpeFile(const QString &path);
+    void showImpeDialog(const Track &track);
 
 private:
     void setupUi();
