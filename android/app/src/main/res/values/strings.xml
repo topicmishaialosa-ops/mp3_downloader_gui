@@ -33,4 +33,7 @@
     <string name="prev">Предыдущий</string>
     <string name="next">Следующий</string>
     <string name="loop">Повтор</string>
+    <string name="playlist">Очередь</string>
+    <string name="add_to_playlist">В очередь</string>
+    <string name="queue_empty">Очередь пуста</string>
 </resources>

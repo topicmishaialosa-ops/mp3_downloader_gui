@@ -9,6 +9,7 @@ import net.mp3party.downloader.databinding.ItemTrackBinding
 class TrackAdapter(
     private val onDownload: (Track, Int) -> Unit,
     private val onStream: (Track, Int) -> Unit,
+    private val onAddToPlaylist: (Track) -> Unit = {},
 ) : RecyclerView.Adapter<TrackAdapter.Holder>() {
 
     private val items = mutableListOf<Track>()
@@ -120,6 +121,10 @@ class TrackAdapter(
                 } else {
                     onStream(track, pos)
                 }
+            }
+
+            binding.addToPlaylistButton.setOnClickListener {
+                onAddToPlaylist(track)
             }
         }
     }

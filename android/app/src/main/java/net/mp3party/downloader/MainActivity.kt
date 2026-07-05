@@ -3,6 +3,7 @@ package net.mp3party.downloader
 import android.content.Intent
 import android.os.Bundle
 import android.widget.ImageButton
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -132,9 +133,16 @@ class MainActivity : AppCompatActivity() {
         playerBarBinding.nextButton.setOnClickListener {
             PlaybackManager.playNext()
         }
+        playerBarBinding.shuffleButton.setOnClickListener {
+            PlaybackManager.toggleShuffle()
+            updateShuffleButton(playerBarBinding.shuffleButton)
+        }
         playerBarBinding.loopButton.setOnClickListener {
             PlaybackManager.advanceLoopMode()
             updateLoopButton(playerBarBinding.loopButton)
+        }
+        playerBarBinding.playlistButton.setOnClickListener {
+            showPlaylistDialog()
         }
         playerBarBinding.seekSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
@@ -158,12 +166,40 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateLoopButton(btn: ImageButton) {
         val icon = when (PlaybackManager.loopMode) {
-            LoopMode.NoRepeat -> R.drawable.ic_expand
-            LoopMode.RepeatAll -> R.drawable.ic_expand
-            LoopMode.RepeatOne -> R.drawable.ic_expand
+            LoopMode.NoRepeat -> R.drawable.ic_repeat
+            LoopMode.RepeatAll -> R.drawable.ic_repeat
+            LoopMode.RepeatOne -> R.drawable.ic_repeat_one
         }
         btn.setImageResource(icon)
         btn.alpha = if (PlaybackManager.loopMode == LoopMode.NoRepeat) 0.4f else 1.0f
+    }
+
+    private fun updateShuffleButton(btn: ImageButton) {
+        btn.alpha = if (PlaybackManager.shuffle) 1.0f else 0.4f
+    }
+
+    private fun showPlaylistDialog() {
+        val items = PlaybackManager.playlist.toList()
+        if (items.isEmpty()) {
+            Snackbar.make(binding.root, getString(R.string.queue_empty), Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        val labels = items.mapIndexed { i, item ->
+            val prefix = if (i == PlaybackManager.playlistIndex) "▶ " else "  "
+            "$prefix${item.title}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.playlist) + " (${items.size})")
+            .setItems(labels) { _, which ->
+                PlaybackManager.playAt(which)
+            }
+            .setPositiveButton("Очистить") { _, _ ->
+                PlaybackManager.clearPlaylist()
+                PlaybackManager.stop()
+                binding.playerBar.root.isVisible = false
+            }
+            .setNeutralButton("Закрыть", null)
+            .show()
     }
 
     private fun startProgressUpdates() {
@@ -235,6 +271,7 @@ class MainActivity : AppCompatActivity() {
         playerBarBinding.expandButton.isVisible = state.isVideo
         playerBarBinding.seekBlock.isVisible = !state.isVideo
         updateLoopButton(playerBarBinding.loopButton)
+        updateShuffleButton(playerBarBinding.shuffleButton)
     }
 
     private fun animatePlayPauseIcon(button: android.widget.ImageButton, toPause: Boolean) {

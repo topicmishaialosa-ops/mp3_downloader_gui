@@ -123,6 +123,21 @@
                 app:iconPadding="0dp"
                 app:iconSize="22dp"
                 app:iconTint="@color/text_on_primary" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/addToPlaylistButton"
+                style="@style/Widget.Material3.Button.IconButton.Filled"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="@string/add_to_playlist"
+                app:backgroundTint="@color/bg_card_elevated"
+                app:icon="@drawable/ic_music_note"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="22dp"
+                app:iconTint="@color/primary"
+                app:strokeColor="@color/primary"
+                app:strokeWidth="1dp" />
         </LinearLayout>
 
         <com.google.android.material.progressindicator.LinearProgressIndicator

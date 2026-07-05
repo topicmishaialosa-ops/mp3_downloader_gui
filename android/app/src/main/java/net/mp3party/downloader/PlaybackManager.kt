@@ -267,6 +267,12 @@ object PlaybackManager {
         emit()
     }
 
+    fun playAt(index: Int) {
+        if (index < 0 || index >= playlist.size) return
+        playlistIndex = index
+        playCurrent()
+    }
+
     fun setVolume(vol: Float) {
         volume = vol.coerceIn(0f, 1f)
         player?.volume = volume

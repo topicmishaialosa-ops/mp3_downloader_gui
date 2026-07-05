@@ -48,6 +48,22 @@ class SearchFragment : Fragment() {
             onStream = { track, position ->
                 (activity as? MainActivity)?.startStream(track, ytFormat, adapter, position)
             },
+            onAddToPlaylist = { track ->
+                val title = listOf(track.artist, track.title)
+                    .filter { it.isNotBlank() }
+                    .joinToString(" — ")
+                val subtitle = track.source.name
+                val url = track.streamUrl
+                val item = PlaylistItem(
+                    pathOrUrl = url,
+                    title = title,
+                    subtitle = subtitle,
+                    isVideo = false,
+                    isUrl = url.isNotEmpty(),
+                )
+                PlaybackManager.addToPlaylist(item)
+                Snackbar.make(binding.root, "➕ $title", Snackbar.LENGTH_SHORT).show()
+            },
         )
         binding.resultsList.layoutManager = LinearLayoutManager(requireContext())
         binding.resultsList.itemAnimator = DefaultItemAnimator()

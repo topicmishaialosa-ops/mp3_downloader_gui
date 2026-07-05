@@ -44,6 +44,18 @@ class LibraryFragment : Fragment() {
                     (activity as? MainActivity)?.playMedia(item.file, item.displayName, item.isVideo)
                 }
             },
+            onAddToPlaylist = { item ->
+                val title = item.displayName
+                val playlistItem = PlaylistItem(
+                    pathOrUrl = item.file.absolutePath,
+                    title = title,
+                    subtitle = if (item.isVideo) "Видео" else "Аудио",
+                    isVideo = item.isVideo,
+                    isUrl = false,
+                )
+                PlaybackManager.addToPlaylist(playlistItem)
+                Snackbar.make(binding.root, "➕ $title", Snackbar.LENGTH_SHORT).show()
+            },
         )
         binding.libraryList.layoutManager = LinearLayoutManager(requireContext())
         binding.libraryList.adapter = adapter
