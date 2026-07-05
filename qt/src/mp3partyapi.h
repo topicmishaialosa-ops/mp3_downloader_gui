@@ -10,6 +10,7 @@
 class Mp3PartyApi {
 public:
     static QVector<Track> search(const QString &query, QString *error = nullptr);
+    static Track fetchTrack(const QString &id);
     static QString download(const Track &track,
                             const QString &folder,
                             QString *error = nullptr,

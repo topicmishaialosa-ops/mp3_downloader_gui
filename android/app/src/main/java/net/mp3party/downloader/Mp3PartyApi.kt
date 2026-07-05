@@ -48,6 +48,44 @@ object Mp3PartyApi {
         Pattern.DOTALL,
     )
 
+    fun fetchTrack(id: String): Track? {
+        val url = "https://mp3party.net/music/$id"
+        val body = get(url, null) ?: return null
+
+        var artist = ""
+        var title = ""
+
+        val panelM = panelPattern.matcher(body)
+        if (panelM.find()) {
+            val a = panelM.group(2)
+            val t = panelM.group(3)
+            if (a != null) artist = decode(a)
+            if (t != null) title = decode(t)
+        }
+
+        if (title.isEmpty()) {
+            val ogM = java.util.regex.Pattern.compile(
+                """property="og:title"\s+content="([^"]+)""""
+            ).matcher(body)
+            if (ogM.find()) {
+                val content = ogM.group(1) ?: ""
+                val parts = content.split(" - ", limit = 2)
+                if (parts.size == 2) {
+                    artist = parts[0].trim()
+                    title = parts[1].trim()
+                } else {
+                    title = content.trim()
+                }
+            }
+        }
+
+        if (title.isEmpty()) {
+            title = "Трек #$id"
+        }
+
+        return Track(id, artist, title, streamUrl(id))
+    }
+
     fun search(query: String): List<Track> {
         val encoded = URLEncoder.encode(query.trim(), Charsets.UTF_8.name())
         val url = "https://mp3party.net/search?q=$encoded"

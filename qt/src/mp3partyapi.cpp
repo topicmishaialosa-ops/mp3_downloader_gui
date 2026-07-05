@@ -96,6 +96,46 @@ QVector<Track> Mp3PartyApi::search(const QString &query, QString *error) {
     return results;
 }
 
+Track Mp3PartyApi::fetchTrack(const QString &id) {
+    Track t;
+    t.id = id;
+    t.source = DownloadSource::Mp3Party;
+    t.url = onlineUrlForId(id);
+
+    const QUrl url(QStringLiteral("https://mp3party.net/music/%1").arg(id));
+    const auto resp = HttpClient::get(url);
+    if (!resp.ok()) {
+        t.title = QStringLiteral("Трек #%1").arg(id);
+        return t;
+    }
+
+    const QString html = QString::fromUtf8(resp.body);
+
+    auto panels = parsePanels(html);
+    if (!panels.isEmpty()) {
+        t.artist = panels.first().artist;
+        t.title = panels.first().title;
+        return t;
+    }
+
+    QRegularExpression ogRe(QStringLiteral("property=\"og:title\"\\s+content=\"([^\"]+)\""));
+    auto ogM = ogRe.match(html);
+    if (ogM.hasMatch()) {
+        const QString content = ogM.captured(1);
+        const auto parts = content.split(QStringLiteral(" - "), Qt::SkipEmptyParts);
+        if (parts.size() >= 2) {
+            t.artist = parts[0].trimmed();
+            t.title = parts.mid(1).join(QStringLiteral(" - ")).trimmed();
+        } else {
+            t.title = content.trimmed();
+        }
+        return t;
+    }
+
+    t.title = QStringLiteral("Трек #%1").arg(id);
+    return t;
+}
+
 static QStringList downloadCandidates(const QString &pageBody, const Track &track) {
     QStringList urls;
     QRegularExpression btnRe(

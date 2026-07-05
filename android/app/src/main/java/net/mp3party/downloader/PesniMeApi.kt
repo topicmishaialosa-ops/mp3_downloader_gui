@@ -25,6 +25,13 @@ object PesniMeApi {
         """\\"id\\":(\d+),\\"artist\\":\\"([^"\\]*)\\",\\"title\\":\\"([^"\\]*)\\",\\"version\\":\\"[^"\\]*\\",\\"duration\\":(\d+),\\"bitrate\\":([^,]*),\\"size\\":([^,]*),\\"play\\":\\"([^"\\]+)\\",\\"download\\":\\"([^"\\]+)\\"""",
     )
 
+    fun fetchTrack(id: String): Track? {
+        val url = trackUrl(id)
+        val body = get(url) ?: return null
+        val results = extractFromPage(body)
+        return results.firstOrNull()
+    }
+
     fun search(query: String): List<Track> {
         val encoded = URLEncoder.encode(query.trim(), Charsets.UTF_8.name())
         val url = "$BASE/search/$encoded?type=tracks"

@@ -2,9 +2,6 @@ package net.mp3party.downloader
 
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Intent
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -16,13 +13,11 @@ import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.LinearLayout
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.FileProvider
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
-import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.snackbar.Snackbar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -36,6 +31,7 @@ class SearchFragment : Fragment() {
     private lateinit var adapter: TrackAdapter
 
     private var source = DownloadSource.MP3Party
+    private var copySource = DownloadSource.MP3Party
     private var ytFormat = YtFormat.MP3
 
     override fun onCreateView(
@@ -72,8 +68,11 @@ class SearchFragment : Fragment() {
                 PlaybackManager.addToPlaylist(item)
                 Snackbar.make(binding.root, "➕ $title", Snackbar.LENGTH_SHORT).show()
             },
-            onShare = { track ->
-                shareTrack(track)
+            onCopyLink = { track ->
+                copyDirectLink(track)
+            },
+            onSaveImpe = { track ->
+                saveTrackAsImpe(track)
             },
         )
         binding.resultsList.layoutManager = LinearLayoutManager(requireContext())
@@ -111,6 +110,10 @@ class SearchFragment : Fragment() {
         binding.impeButton.setOnClickListener {
             impePicker.launch("*/*")
         }
+
+        binding.importLinksButton.setOnClickListener { openImportLinksDialog() }
+
+        binding.saveImpeButton.setOnClickListener { saveImpeFiles() }
 
         updateYtdlpStatus()
         updateEmptyState(show = true, hasResults = false)
@@ -284,7 +287,26 @@ class SearchFragment : Fragment() {
                 queries.forEachIndexed { idx, q ->
                     val num = idx + 1
                     if (q.isUrl) {
-                        binding.statusText.text = "[$num/${queries.size}] ⚠️ URL в списке не поддерживается"
+                        val url = q.url ?: return@forEachIndexed
+                        val lower = url.lowercase()
+                        val isDirect = lower.endsWith(".mp3") || lower.endsWith(".mp4") ||
+                            lower.endsWith(".m4a") || lower.endsWith(".ogg") ||
+                            lower.endsWith(".flac") || lower.endsWith(".wav") ||
+                            lower.contains("/download/") || lower.contains("/dl/online/") ||
+                            lower.contains("pl.pesni.me")
+                        if (isDirect) {
+                            val filename = url.substringAfterLast('/').substringBeforeLast('.')
+                                .replace('_', ' ')
+                            collected.add(Track(
+                                id = "",
+                                artist = "",
+                                title = filename,
+                                streamUrl = url,
+                                source = source,
+                            ))
+                            return@forEachIndexed
+                        }
+                        binding.statusText.text = "[$num/${queries.size}] ⚠️ URL не распознан: $url"
                         return@forEachIndexed
                     }
                     binding.statusText.text = "[$num/${queries.size}] 🔎 ${q.searchText()}"
@@ -308,7 +330,7 @@ class SearchFragment : Fragment() {
                     }
                 }
                 // Дедупликация по id в пределах источника.
-                val unique = collected.distinctBy { "${it.source}:${it.id}" }
+                val unique = collected.distinctBy { "${it.source}:${it.id}:${it.streamUrl}" }
                 adapter.submit(unique)
                 updateEmptyState(show = unique.isEmpty(), hasResults = unique.isNotEmpty())
                 if (autodlTracks.isNotEmpty()) {
@@ -332,10 +354,110 @@ class SearchFragment : Fragment() {
         }
     }
 
+    private fun openImportLinksDialog() {
+        val ctx = requireContext()
+        val edit = EditText(ctx).apply {
+            hint = "https://dl2.mp3party.net/download/12345\nhttps://cdn.example.com/song.mp3\nhttps://s123.pl.pesni.me/track/abc.mp3"
+            setSingleLine(false)
+            setLines(6)
+            minLines = 3
+            maxLines = 12
+            setHorizontallyScrolling(true)
+            setTextAppearance(android.R.style.TextAppearance_Material_Body1)
+        }
+        val scroll = android.widget.ScrollView(ctx).apply {
+            setPadding(48, 24, 48, 0)
+            addView(edit)
+        }
+        MaterialAlertDialogBuilder(ctx)
+            .setTitle("🔗 Импорт прямых ссылок")
+            .setMessage("Вставьте прямые ссылки на аудиофайлы (по одной на строку).\nПоддерживаются: .mp3, .mp4, .m4a, .ogg, .flac, .wav, а также ссылки /download/, /dl/online/, pl.pesni.me")
+            .setView(scroll)
+            .setPositiveButton("📥 Импортировать") { _, _ ->
+                val text = edit.text?.toString().orEmpty()
+                importDirectLinks(text)
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
+    private fun importDirectLinks(text: String) {
+        val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.isEmpty()) {
+            Snackbar.make(binding.root, "Список пуст", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        val patterns = listOf(".mp3", ".mp4", ".m4a", ".ogg", ".flac", ".wav",
+            "/download/", "/dl/online/", "pl.pesni.me")
+
+        lifecycleScope.launch {
+            val tracks = withContext(Dispatchers.IO) {
+                val result = mutableListOf<Track>()
+                for (line in lines) {
+                    val lower = line.lowercase()
+                    val isDirect = patterns.any { lower.contains(it) }
+                    if (!isDirect || !(lower.startsWith("http://") || lower.startsWith("https://"))) continue
+
+                    if (lower.contains("mp3party.net/download/")) {
+                        val id = line.substringAfterLast('/').substringBefore('.').trim()
+                        if (id.isNotEmpty()) {
+                            val fetched = Mp3PartyApi.fetchTrack(id)
+                            if (fetched != null) {
+                                result.add(fetched.copy(streamUrl = line))
+                                continue
+                            }
+                        }
+                    } else if (lower.contains("pl.pesni.me") || lower.contains("dw.pesni.me")) {
+                        val id = line.substringAfterLast('/').substringBefore('.').trim()
+                        if (id.isNotEmpty()) {
+                            val fetched = PesniMeApi.fetchTrack(id)
+                            if (fetched != null) {
+                                result.add(fetched.copy(streamUrl = line))
+                                continue
+                            }
+                        }
+                    }
+                    val filename = line.substringAfterLast('/').substringBeforeLast('.')
+                        .replace('_', ' ')
+                    result.add(Track(id = "", artist = "", title = filename, streamUrl = line, source = source))
+                }
+                result
+            }
+            if (tracks.isEmpty()) {
+                Snackbar.make(binding.root, "Не удалось распознать ссылки", Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        adapter.submit(tracks)
+        updateEmptyState(show = false, hasResults = true)
+        binding.statusText.text = "✅ Импортировано ${tracks.size} ссылок"
+    }
+
     private fun updateEmptyState(show: Boolean, hasResults: Boolean) {
         binding.emptyState.root.isVisible = show && !hasResults
         binding.resultsList.isVisible = hasResults
         binding.downloadAllButton.isVisible = hasResults
+        binding.saveImpeButton.isVisible = hasResults
+    }
+
+    private fun saveImpeFiles() {
+        val tracks = adapter.getItems()
+        if (tracks.isEmpty()) return
+        val dir = java.io.File(requireContext().getExternalFilesDir(null), "impe")
+        dir.mkdirs()
+        var saved = 0
+        for (t in tracks) {
+            val impe = buildString {
+                appendLine("source=${t.source.name}")
+                appendLine("id=${t.id}")
+                appendLine("artist=${t.artist}")
+                appendLine("title=${t.title}")
+                appendLine("url=${t.streamUrl}")
+            }
+            val fname = "${t.artist.replace(' ', '_')}_${t.title.replace(' ', '_')}.impe"
+            val file = java.io.File(dir, fname)
+            if (file.writeText(impe); true) saved++
+        }
+        Snackbar.make(binding.root, "💾 Сохранено .impe: $saved в ${dir.absolutePath}", Snackbar.LENGTH_LONG).show()
     }
 
     private fun tracksWord(n: Int): String = when {
@@ -345,110 +467,38 @@ class SearchFragment : Fragment() {
         else -> "треков"
     }
 
-    private fun impeString(track: Track): String = buildString {
-        appendLine("source=${track.source.name}")
-        appendLine("id=${track.id}")
-        appendLine("artist=${track.artist}")
-        appendLine("title=${track.title}")
-        appendLine("url=${track.streamUrl}")
-    }
-
-    private fun shareTrackAsFile(track: Track) {
-        val impe = impeString(track)
-        try {
-            val dir = java.io.File(requireContext().cacheDir, "impe")
-            dir.mkdirs()
-            val file = java.io.File(dir, "${track.id}.impe")
-            file.writeText(impe)
-            val uri = FileProvider.getUriForFile(
-                requireContext(),
-                "${requireContext().packageName}.fileprovider",
-                file,
-            )
-            val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                type = "application/octet-stream"
-                putExtra(Intent.EXTRA_STREAM, uri)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            startActivity(Intent.createChooser(shareIntent, getString(R.string.share_track)))
-        } catch (_: Exception) {
-            Snackbar.make(binding.root, "Не удалось поделиться", Snackbar.LENGTH_SHORT).show()
+    private fun saveTrackAsImpe(track: Track) {
+        val dir = java.io.File(requireContext().getExternalFilesDir(null), "impe")
+        dir.mkdirs()
+        val impe = buildString {
+            appendLine("source=${track.source.name}")
+            appendLine("id=${track.id}")
+            appendLine("artist=${track.artist}")
+            appendLine("title=${track.title}")
+            appendLine("url=${track.streamUrl}")
         }
+        val fname = "${track.artist.replace(' ', '_')}_${track.title.replace(' ', '_')}.impe"
+        val file = java.io.File(dir, fname)
+        file.writeText(impe)
+        Snackbar.make(binding.root, "💾 Сохранено: ${file.absolutePath}", Snackbar.LENGTH_LONG).show()
     }
 
-    private fun shareTrack(track: Track) {
-        val options = arrayOf("📁 Сохранить как .impe", "☁ Загрузить на сервер")
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle("${track.artist} — ${track.title}")
-            .setItems(options) { _, which ->
-                when (which) {
-                    0 -> shareTrackAsFile(track)
-                    1 -> showShareUploadDialog(track)
-                }
+    private fun copyDirectLink(track: Track) {
+        val url = when (copySource) {
+            DownloadSource.MP3Party -> {
+                if (track.streamUrl.startsWith("http")) track.streamUrl
+                else "https://dl2.mp3party.net/online/${track.id}.mp3"
             }
-            .setNegativeButton("Отмена", null)
-            .show()
-    }
-
-    private fun showShareUploadDialog(track: Track) {
-        val impe = impeString(track)
-        val ttlLayout = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(EditText(requireContext()).apply {
-                hint = "Время жизни (мин)"
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                setText("5")
-                id = android.R.id.text1
-            })
-            addView(EditText(requireContext()).apply {
-                hint = "Макс. использований (0 = безлимит)"
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                setText("0")
-                id = android.R.id.text2
-            })
+            DownloadSource.DriveMusic -> track.streamUrl
+            DownloadSource.PesniMe -> track.streamUrl
+            DownloadSource.YouTube -> track.streamUrl
         }
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle("☁ Загрузить на сервер")
-            .setView(ttlLayout)
-            .setPositiveButton("Загрузить") { _, _ ->
-                val ttl = (ttlLayout.findViewById<EditText>(android.R.id.text1).text.toString().toIntOrNull() ?: 5).coerceIn(1, 60)
-                val maxUses = (ttlLayout.findViewById<EditText>(android.R.id.text2).text.toString().toIntOrNull() ?: 0).coerceIn(0, 100)
-                doShareUpload(track, impe, ttl, maxUses)
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
-    }
-
-    private fun doShareUpload(track: Track, impe: String, ttl: Int, maxUses: Int) {
-        lifecycleScope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    val client = okhttp3.OkHttpClient()
-                    val json = org.json.JSONObject().apply {
-                        put("content", impe)
-                        put("ttl_minutes", ttl)
-                        put("max_uses", maxUses)
-                    }
-                    val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-                    val request = okhttp3.Request.Builder()
-                        .url("https://krasava.xyz/api/share")
-                        .post(body)
-                        .build()
-                    val response = client.newCall(request).execute()
-                    val responseBody = response.body?.string() ?: return@withContext null
-                    val obj = org.json.JSONObject(responseBody)
-                    obj.optString("url").takeIf { it.isNotEmpty() }
-                }
-                if (result != null) {
-                    val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("share_url", result))
-                    Snackbar.make(binding.root, "✅ Ссылка скопирована: $result", Snackbar.LENGTH_LONG).show()
-                } else {
-                    Snackbar.make(binding.root, "❌ Ошибка загрузки на сервер", Snackbar.LENGTH_SHORT).show()
-                }
-            } catch (_: Exception) {
-                Snackbar.make(binding.root, "❌ Ошибка сети", Snackbar.LENGTH_SHORT).show()
-            }
+        if (url.startsWith("http")) {
+            val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("direct_link", url))
+            Snackbar.make(binding.root, "📋 Скопировано: $url", Snackbar.LENGTH_SHORT).show()
+        } else {
+            Snackbar.make(binding.root, "❌ Ссылка недоступна", Snackbar.LENGTH_SHORT).show()
         }
     }
 

@@ -10,7 +10,8 @@ class TrackAdapter(
     private val onDownload: (Track, Int) -> Unit,
     private val onStream: (Track, Int) -> Unit,
     private val onAddToPlaylist: (Track) -> Unit = {},
-    private val onShare: (Track) -> Unit = {},
+    private val onCopyLink: (Track) -> Unit = {},
+    private val onSaveImpe: (Track) -> Unit = {},
 ) : RecyclerView.Adapter<TrackAdapter.Holder>() {
 
     private val items = mutableListOf<Track>()
@@ -129,7 +130,11 @@ class TrackAdapter(
             }
 
             binding.shareButton.setOnClickListener {
-                onShare(track)
+                onCopyLink(track)
+            }
+
+            binding.saveImpeButton.setOnClickListener {
+                onSaveImpe(track)
             }
         }
     }

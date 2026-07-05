@@ -115,6 +115,30 @@ QVector<Track> PesniMeApi::search(const QString &query, QString *error) {
     return results.mid(0, 30);
 }
 
+Track PesniMeApi::fetchTrack(const QString &id) {
+    Track t;
+    t.id = id;
+    t.source = DownloadSource::PesniMe;
+
+    const QUrl url(trackUrl(id));
+    const auto resp = HttpClient::get(url);
+    if (!resp.ok()) {
+        t.title = QStringLiteral("Трек #%1").arg(id);
+        return t;
+    }
+
+    const QString body = QString::fromUtf8(resp.body);
+    auto results = extractTracks(body);
+    if (!results.isEmpty()) {
+        t = results.first();
+        t.source = DownloadSource::PesniMe;
+        return t;
+    }
+
+    t.title = QStringLiteral("Трек #%1").arg(id);
+    return t;
+}
+
 static QString sanitizeName(const QString &s) {
     QString r = s.trimmed();
     const QString bad = QStringLiteral("/\\:*?\"<>|");
