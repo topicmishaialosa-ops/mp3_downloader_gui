@@ -4722,6 +4722,19 @@ impl LinkParserApp {
         ui.label(egui::RichText::new(format!("{} — {}", track.artist, track.title)).size(14.0).strong());
         ui.add_space(8.0);
 
+        if ui.add(theme.neutral_button("🔗 Копировать прямую ссылку")).clicked() {
+            let direct_url = match source {
+                DownloadSource::Mp3Party => format!("https://dl2.mp3party.net/download/{}", track.id),
+                DownloadSource::YtDlp => format!("https://www.youtube.com/watch?v={}", track.id),
+                _ => track.url.clone(),
+            };
+            ui.output_mut(|o| o.copied_text = direct_url);
+            self.status = "🔗 Прямая ссылка скопирована в буфер обмена".into();
+            self.show_share_dialog = false;
+            return;
+        }
+        ui.add_space(4.0);
+
         if ui.add(theme.neutral_button("📁 Сохранить как .impe")).clicked() {
             let impe = format!(
                 "source={}\nid={}\nartist={}\ntitle={}\nurl={}\n",

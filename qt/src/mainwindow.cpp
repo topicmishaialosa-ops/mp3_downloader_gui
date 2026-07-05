@@ -774,6 +774,7 @@ void MainWindow::showShareDialog(const Track &track) {
     lay->addWidget(label);
     lay->addSpacing(8);
 
+    auto *urlBtn = new QPushButton(QStringLiteral("🔗 Копировать прямую ссылку"));
     auto *fileBtn = new QPushButton(QStringLiteral("📁 Сохранить как .impe"));
     auto *serverGroup = new QGroupBox(QStringLiteral("☁ Загрузить на сервер"));
     auto *svLay = new QVBoxLayout(serverGroup);
@@ -798,6 +799,7 @@ void MainWindow::showShareDialog(const Track &track) {
 
     auto *closeBtn = new QPushButton(QStringLiteral("✕ Закрыть"));
 
+    lay->addWidget(urlBtn);
     lay->addWidget(fileBtn);
     lay->addWidget(serverGroup);
     lay->addStretch();
@@ -805,6 +807,24 @@ void MainWindow::showShareDialog(const Track &track) {
     btnRow->addStretch();
     btnRow->addWidget(closeBtn);
     lay->addLayout(btnRow);
+
+    connect(urlBtn, &QPushButton::clicked, &dlg, [this, track, &dlg]() {
+        QString directUrl;
+        switch (track.source) {
+        case DownloadSource::Mp3Party:
+            directUrl = QStringLiteral("https://dl2.mp3party.net/download/%1").arg(track.id);
+            break;
+        case DownloadSource::YtDlp:
+            directUrl = QStringLiteral("https://www.youtube.com/watch?v=%1").arg(track.id);
+            break;
+        default:
+            directUrl = track.url;
+            break;
+        }
+        QApplication::clipboard()->setText(directUrl);
+        onLog(QStringLiteral("🔗 Прямая ссылка скопирована: %1").arg(directUrl));
+        dlg.accept();
+    });
 
     connect(fileBtn, &QPushButton::clicked, &dlg, [this, track, &dlg]() {
         const QString impe = QStringLiteral("source=%1\nid=%2\nartist=%3\ntitle=%4\nurl=%5\n").arg(downloadSourceToImpeName(track.source), track.id, track.artist, track.title, track.url);

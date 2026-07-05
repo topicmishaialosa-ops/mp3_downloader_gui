@@ -387,13 +387,23 @@ class SearchFragment : Fragment() {
     }
 
     private fun shareTrack(track: Track) {
-        val options = arrayOf("📁 Сохранить как .impe", "☁ Загрузить на сервер")
+        val options = arrayOf("🔗 Копировать прямую ссылку", "📁 Сохранить как .impe", "☁ Загрузить на сервер")
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("${track.artist} — ${track.title}")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> shareTrackAsFile(track)
-                    1 -> showShareUploadDialog(track)
+                    0 -> {
+                        val directUrl = when (track.source) {
+                            DownloadSource.MP3Party -> "https://dl2.mp3party.net/download/${track.id}"
+                            DownloadSource.YouTube -> "https://www.youtube.com/watch?v=${track.id}"
+                            else -> track.streamUrl
+                        }
+                        val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
+                        clipboard.setPrimaryClip(ClipData.newPlainText("direct_url", directUrl))
+                        Snackbar.make(binding.root, "🔗 Прямая ссылка скопирована", Snackbar.LENGTH_SHORT).show()
+                    }
+                    1 -> shareTrackAsFile(track)
+                    2 -> showShareUploadDialog(track)
                 }
             }
             .setNegativeButton("Отмена", null)
