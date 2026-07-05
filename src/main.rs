@@ -3478,11 +3478,12 @@ impl eframe::App for LinkParserApp {
                 });
         }
 
-        if self.share_import_result.is_some() {
-            let parsed = self.share_import_result.as_ref()
-                .and_then(|r| r.lock().unwrap().take());
-            self.share_import_result = None;
-            self.share_import_url.clear();
+        if let Some(ref r) = self.share_import_result {
+            let parsed = r.lock().unwrap().take();
+            if parsed.is_some() {
+                self.share_import_result = None;
+                self.share_import_url.clear();
+            }
             if let Some(p) = parsed {
                 self.impe_to_handle = Some(p);
             }
