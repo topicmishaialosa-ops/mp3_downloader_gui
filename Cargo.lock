@@ -2452,9 +2452,11 @@ dependencies = [
 
 [[package]]
 name = "mp3_downloader_gui"
-version = "1.16.6"
+version = "1.19.0"
 dependencies = [
+ "base64",
  "eframe",
+ "percent-encoding",
  "rand 0.8.6",
  "regex",
  "reqwest",

@@ -296,8 +296,8 @@ class SearchFragment : Fragment() {
                             lower.contains("/download/") || lower.contains("/dl/online/") ||
                             lower.contains("pl.pesni.me")
                         if (isDirect) {
-                            val filename = url.substringAfterLast('/').substringBeforeLast('.')
-                                .replace('_', ' ')
+                            val raw = url.substringAfterLast('/').substringBeforeLast('.')
+                            val filename = sanitizeFilename(raw)
                             collected.add(Track(
                                 id = "",
                                 artist = "",
@@ -418,8 +418,8 @@ class SearchFragment : Fragment() {
                             }
                         }
                     }
-                    val filename = line.substringAfterLast('/').substringBeforeLast('.')
-                        .replace('_', ' ')
+                    val raw = line.substringAfterLast('/').substringBeforeLast('.')
+                    val filename = sanitizeFilename(raw)
                     result.add(Track(id = "", artist = "", title = filename, streamUrl = line, source = source))
                 }
                 result
@@ -513,6 +513,33 @@ class SearchFragment : Fragment() {
     fun refreshYtdlpStatus() {
         if (_binding == null) return
         updateYtdlpStatus()
+    }
+
+    private fun sanitizeFilename(raw: String): String {
+        // 1) URL-декодировать (%D0%A1 → К, + → пробел)
+        var name = try {
+            java.net.URLDecoder.decode(raw.replace('+', ' '), "UTF-8")
+        } catch (_: Exception) { raw }
+
+        // 2) Попробовать декодировать base64, если похоже на валидный base64
+        val b64Clean = name.replace('-', '+').replace('_', '/').trimEnd('=')
+        if (b64Clean.length >= 8 && b64Clean.length % 4 == 0
+            && b64Clean.all { it in 'A'..'Z' || it in 'a'..'z' || it in '0'..'9' || it == '+' || it == '/' }) {
+            try {
+                val decoded = android.util.Base64.decode(b64Clean, android.util.Base64.DEFAULT)
+                val text = String(decoded, Charsets.UTF_8)
+                if (Regex("\\p{L}").containsMatchIn(text) && !text.contains('\u0000')) {
+                    name = text
+                }
+            } catch (_: Exception) { /* не base64 */ }
+        }
+
+        return name
+            .replace('_', ' ')
+            .replace(Regex("[^\\p{L}\\p{N}\\s\\-+]"), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .ifEmpty { "track" }
     }
 
     override fun onDestroyView() {

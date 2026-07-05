@@ -8,6 +8,8 @@ mod player;
 use eframe::egui::{self, Color32, Frame, Margin, Rounding, Stroke, Vec2};
 use library::{list_downloads, LocalMedia};
 use player::{open_folder_in_file_manager, AudioPlayer, LoopMode, PlaylistItem};
+use base64::Engine;
+use percent_encoding::percent_decode_str;
 use regex::Regex;
 use scraper::{Html, Selector};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -49,6 +51,91 @@ const PESNIME_BASE: &str = "https://music.pesni.me";
 
 /// Минимальный размер MP3; меньше — считаем ошибкой (HTML/редирект) и удаляем
 const MIN_DOWNLOAD_BYTES: u64 = 50 * 1024;
+
+/// Очистить имя файла: URL-декодировать, попробовать base64, убрать мусор
+fn sanitize_filename(raw: &str) -> String {
+    // 1) URL-декодировать (%D0%A1 → К, + → пробел)
+    let url_decoded = raw.replace('+', " ");
+    let mut name = percent_decode_str(&url_decoded)
+        .decode_utf8()
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| url_decoded.to_string());
+
+    // 2) Попробовать декодировать base64
+    let b64_clean: String = name
+        .chars()
+        .map(|c| match c {
+            '-' => '+',
+            '_' => '/',
+            _ => c,
+        })
+        .collect();
+    let b64_trimmed = b64_clean.trim_end_matches('=');
+    if b64_trimmed.len() >= 8
+        && b64_trimmed.len() % 4 == 0
+        && b64_trimmed
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
+    {
+        if let Ok(decoded) = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            b64_trimmed.as_bytes(),
+        ) {
+            let text = String::from_utf8_lossy(&decoded).into_owned();
+            if text.chars().any(|c| c.is_alphabetic()) && !text.contains('\0') {
+                name = text;
+            }
+        }
+    }
+
+    // 3) Очистить от мусора
+    name = name
+        .replace('_', " ")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_alphabetic() || *c == ' ' || *c == '-' || *c == '+')
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        "track".to_string()
+    } else {
+        name
+    }
+}
+
+/// Извлечь имя файла из заголовка Content-Disposition (RFC 6266 / RFC 5987)
+fn extract_filename_from_disposition(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let cd = headers.get(reqwest::header::CONTENT_DISPOSITION)?.to_str().ok()?;
+
+    // filename*=UTF-8''...  (RFC 5987)
+    if let Some(idx) = cd.find("filename*=UTF-8''") {
+        let encoded = &cd[idx + 17..];
+        let end = encoded.find(|c: char| c == ';' || c.is_whitespace()).unwrap_or(encoded.len());
+        let value = &encoded[..end];
+        return urlencoding::decode(value).ok().map(|s| s.into_owned());
+    }
+
+    // filename="..." или filename=...
+    let cd_lower = cd.to_lowercase();
+    if let Some(idx) = cd_lower.find("filename=") {
+        let rest = &cd[idx + 9..].trim();
+        let name = if rest.starts_with('"') {
+            let end = rest[1..].find('"').map(|i| i + 1).unwrap_or(rest.len());
+            &rest[1..end]
+        } else {
+            let end = rest.find(|c: char| c == ';' || c.is_whitespace()).unwrap_or(rest.len());
+            &rest[..end]
+        };
+        if !name.is_empty() {
+            return urlencoding::decode(name).ok().map(|s| s.into_owned());
+        }
+    }
+
+    None
+}
 
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
@@ -2005,6 +2092,7 @@ impl LinkParserApp {
                 };
 
                 let total = resp.content_length().unwrap_or(0);
+                let resp_headers = resp.headers().clone();
                 let mut file = match std::fs::File::create(&filepath) {
                     Ok(f) => f,
                     Err(e) => {
@@ -2070,9 +2158,26 @@ impl LinkParserApp {
                     continue;
                 }
 
-                Self::log_send(&log_tx, format!("✅ MP3Party: {}", filepath.display()));
+                // Переименовать по Content-Disposition
+                let final_path = if let Some(cd_name) = extract_filename_from_disposition(&resp_headers) {
+                    if cd_name.ends_with(".mp3") {
+                        let new_path = folder.join(&cd_name);
+                        if new_path != filepath {
+                            let _ = std::fs::rename(&filepath, &new_path);
+                            new_path
+                        } else {
+                            filepath
+                        }
+                    } else {
+                        filepath
+                    }
+                } else {
+                    filepath
+                };
+
+                Self::log_send(&log_tx, format!("✅ MP3Party: {}", final_path.display()));
                 let mut s = status.lock().unwrap();
-                *s = DownloadStatus::Completed(filepath.to_string_lossy().to_string());
+                *s = DownloadStatus::Completed(final_path.to_string_lossy().to_string());
                 return;
             }
 
@@ -2327,6 +2432,7 @@ impl LinkParserApp {
                 };
 
                 let total = resp.content_length().unwrap_or(0);
+                let resp_headers = resp.headers().clone();
                 let mut file = match std::fs::File::create(&filepath) {
                     Ok(f) => f,
                     Err(e) => {
@@ -2387,9 +2493,26 @@ impl LinkParserApp {
                     continue;
                 }
 
-                Self::log_send(&log_tx, format!("✅ DriveMusic: {}", filepath.display()));
+                // Переименовать по Content-Disposition
+                let final_path = if let Some(cd_name) = extract_filename_from_disposition(&resp_headers) {
+                    if cd_name.ends_with(".mp3") {
+                        let new_path = folder.join(&cd_name);
+                        if new_path != filepath {
+                            let _ = std::fs::rename(&filepath, &new_path);
+                            new_path
+                        } else {
+                            filepath
+                        }
+                    } else {
+                        filepath
+                    }
+                } else {
+                    filepath
+                };
+
+                Self::log_send(&log_tx, format!("✅ DriveMusic: {}", final_path.display()));
                 let mut s = status.lock().unwrap();
-                *s = DownloadStatus::Completed(filepath.to_string_lossy().to_string());
+                *s = DownloadStatus::Completed(final_path.to_string_lossy().to_string());
                 return;
             }
 
@@ -2507,6 +2630,7 @@ impl LinkParserApp {
             };
 
             let total = resp.content_length().unwrap_or(0);
+            let resp_headers = resp.headers().clone();
             let mut file = match std::fs::File::create(&filepath) {
                 Ok(f) => f,
                 Err(e) => {
@@ -2570,9 +2694,26 @@ impl LinkParserApp {
                 return;
             }
 
-            Self::log_send(&log_tx, format!("✅ Pesni.me: {}", filepath.display()));
+            // Переименовать по Content-Disposition
+            let final_path = if let Some(cd_name) = extract_filename_from_disposition(&resp_headers) {
+                if cd_name.ends_with(".mp3") || cd_name.ends_with(".m4a") {
+                    let new_path = folder.join(&cd_name);
+                    if new_path != filepath {
+                        let _ = std::fs::rename(&filepath, &new_path);
+                        new_path
+                    } else {
+                        filepath
+                    }
+                } else {
+                    filepath
+                }
+            } else {
+                filepath
+            };
+
+            Self::log_send(&log_tx, format!("✅ Pesni.me: {}", final_path.display()));
             let mut s = status.lock().unwrap();
-            *s = DownloadStatus::Completed(filepath.to_string_lossy().to_string());
+            *s = DownloadStatus::Completed(final_path.to_string_lossy().to_string());
         });
     }
 
@@ -2885,13 +3026,13 @@ impl LinkParserApp {
                         None
                     }
                 } else if lower.contains("drivemusic.me/dl/") {
-                    let filename = url
+                    let raw = url
                         .rsplit('/')
                         .next()
                         .unwrap_or("track")
                         .split('.').next()
-                        .unwrap_or("track")
-                        .replace('_', " ");
+                        .unwrap_or("track");
+                    let filename = sanitize_filename(raw);
                     Some(TrackInfo {
                         id: String::new(),
                         artist: String::new(),
@@ -2907,13 +3048,13 @@ impl LinkParserApp {
                         let _ = tx.send(ParseResult::Success(track));
                     }
                     None => {
-                        let filename = url
+                        let raw = url
                             .rsplit('/')
                             .next()
                             .unwrap_or("track")
                             .split('.').next()
-                            .unwrap_or("track")
-                            .replace('_', " ");
+                            .unwrap_or("track");
+                        let filename = sanitize_filename(raw);
                         let _ = tx.send(ParseResult::Success(TrackInfo {
                             id: String::new(),
                             artist: String::new(),

@@ -4,6 +4,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.net.URLEncoder
+import java.net.URLDecoder
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
@@ -95,6 +96,19 @@ object PesniMeApi {
                 destFile.delete()
                 throw IllegalStateException("Pesni.me: файл слишком маленький ($written B)")
             }
+
+            // Переименовать файл по Content-Disposition
+            val cdHeader = resp.header("Content-Disposition") ?: ""
+            val cdName = extractFileNameFromDisposition(cdHeader)
+            if (cdName != null && (cdName.endsWith(".mp3", ignoreCase = true) ||
+                    cdName.endsWith(".m4a", ignoreCase = true))) {
+                val renamed = File(destFile.parentFile, cdName)
+                if (renamed.absolutePath != destFile.absolutePath) {
+                    destFile.renameTo(renamed)
+                    return renamed.absolutePath
+                }
+            }
+
             return destFile.absolutePath
         }
     }
@@ -127,6 +141,20 @@ object PesniMeApi {
             results.add(Track(id, artist, title, url, DownloadSource.PesniMe))
         }
         return results
+    }
+
+    private fun extractFileNameFromDisposition(header: String): String? {
+        val utf8 = Regex("filename\\*=UTF-8''([^;\\s]+)", RegexOption.IGNORE_CASE)
+            .find(header)?.groupValues?.get(1)
+        if (utf8 != null) {
+            return try { URLDecoder.decode(utf8, "UTF-8") } catch (_: Exception) { null }
+        }
+        val plain = Regex("""filename="?([^";\s]+)"?""", RegexOption.IGNORE_CASE)
+            .find(header)?.groupValues?.get(1)
+        if (plain != null) {
+            return try { URLDecoder.decode(plain, "UTF-8") } catch (_: Exception) { null }
+        }
+        return null
     }
 
     private fun get(url: String): String? {

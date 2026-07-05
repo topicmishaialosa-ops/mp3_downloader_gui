@@ -18,6 +18,7 @@
 #include <QCheckBox>
 #include <QSlider>
 #include <QTabWidget>
+#include <QRegularExpression>
 #include <QClipboard>
 #include <QDir>
 #include <QFile>
@@ -37,6 +38,32 @@
 #include "pesnimeapi.h"
 #include "mpvhelper.h"
 #include "ytdlphelper.h"
+
+static QString sanitizeFilename(const QString &raw) {
+    // 1) URL-декодировать (%D0%A1 → К, + → пробел)
+    QString name = QUrl::fromPercentEncoding(raw.toUtf8()).replace(QLatin1Char('+'), QLatin1Char(' '));
+
+    // 2) Попробовать декодировать base64, если похоже на валидный base64
+    QByteArray b64 = name.toUtf8();
+    QRegularExpression b64Re(QStringLiteral("^[A-Za-z0-9+/=_-]{8,}$"));
+    if (b64Re.match(name).hasMatch() && name.length() % 4 == 0) {
+        QByteArray padded = b64.replace('-', '+').replace('_', '/');
+        while (padded.length() % 4 != 0) padded.append('=');
+        QByteArray decoded = QByteArray::fromBase64(padded, QByteArray::Base64Encoding);
+        QString text = QString::fromUtf8(decoded);
+        QRegularExpression letterRe(QStringLiteral("\\p{L}"));
+        if (letterRe.match(text).hasMatch() && !text.contains(QLatin1Char('\0'))) {
+            name = text;
+        }
+    }
+
+    // 3) Очистить от мусора
+    name.replace(QLatin1Char('_'), QLatin1Char(' '));
+    name.remove(QRegularExpression(QStringLiteral("[^\\p{L}\\p{N}\\s\\-+]")));
+    name.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+    name = name.trimmed();
+    return name.isEmpty() ? QStringLiteral("track") : name;
+}
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setupUi();
@@ -491,7 +518,8 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index, bool auto
             url.contains("/download/") || url.contains("/dl/online/") ||
             url.contains("pl.pesni.me");
         if (isDirect) {
-            const QString filename = q.url.section('/', -1).section('.', 0, 0).replace('_', ' ');
+            const QString raw = q.url.section('/', -1).section('.', 0, 0);
+            const QString filename = sanitizeFilename(raw);
             Track t;
             t.id.clear();
             t.artist.clear();
@@ -926,7 +954,7 @@ void MainWindow::onImportLinks() {
                     t = Mp3PartyApi::fetchTrack(id);
                     t.streamUrl = line;
                 } else {
-                    t.title = line.section('/', -1).section('.', 0, 0).replace('_', ' ');
+                    t.title = sanitizeFilename(line.section('/', -1).section('.', 0, 0));
                     t.streamUrl = line;
                     t.source = currentSource();
                 }
@@ -936,12 +964,12 @@ void MainWindow::onImportLinks() {
                     t = PesniMeApi::fetchTrack(id);
                     t.streamUrl = line;
                 } else {
-                    t.title = line.section('/', -1).section('.', 0, 0).replace('_', ' ');
+                    t.title = sanitizeFilename(line.section('/', -1).section('.', 0, 0));
                     t.streamUrl = line;
                     t.source = currentSource();
                 }
             } else {
-                t.title = line.section('/', -1).section('.', 0, 0).replace('_', ' ');
+                t.title = sanitizeFilename(line.section('/', -1).section('.', 0, 0));
                 t.streamUrl = line;
                 t.source = currentSource();
             }

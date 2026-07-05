@@ -207,6 +207,15 @@ QString Mp3PartyApi::download(const Track &track,
         if (r.ok()) {
             QFile f(dest);
             if (f.open(QIODevice::ReadOnly) && f.size() >= kMinDownloadBytes) {
+                // Переименовать по Content-Disposition
+                const QString cdName = HttpClient::extractFileNameFromDisposition(r.rawHeaders);
+                if (!cdName.isEmpty() && cdName.endsWith(QStringLiteral(".mp3"), Qt::CaseInsensitive)) {
+                    const QString newPath = QDir(folder).filePath(cdName);
+                    if (newPath != dest) {
+                        QFile::rename(dest, newPath);
+                        return newPath;
+                    }
+                }
                 return dest;
             }
             f.remove();

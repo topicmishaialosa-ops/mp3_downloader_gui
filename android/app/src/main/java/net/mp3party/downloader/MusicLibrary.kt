@@ -46,73 +46,50 @@ object MusicLibrary {
 
         val authority = "${context.packageName}.fileprovider"
 
-        // 1) Стандартный Documents UI (primary:Android/data/…/files/Music)
-        buildStorageDocumentUri(dir)?.let { docUri ->
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(docUri, DocumentsContract.Document.MIME_TYPE_DIR)
-                addCategory(Intent.CATEGORY_DEFAULT)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            if (intent.resolveActivity(context.packageManager) != null) {
+        // 1) FileProvider + открытие файла (надёжный способ)
+        dir.listFiles()?.filter { it.isFile }
+            ?.maxByOrNull { it.lastModified() }?.let { newest ->
                 try {
-                    context.startActivity(Intent.createChooser(intent, "Открыть папку"))
-                    return null
-                } catch (_: Exception) {
-                    // пробуем следующий способ
-                }
+                    val uri = FileProvider.getUriForFile(context, authority, newest)
+                    val mime = if (newest.extension.lowercase() in videoExt) "video/*" else "audio/*"
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, mime)
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    if (intent.resolveActivity(context.packageManager) != null) {
+                        context.startActivity(intent)
+                        return null
+                    }
+                } catch (_: Exception) { /* next */ }
             }
-        }
 
-        // 2) FileProvider + MIME каталога
+        // 2) Попробовать открыть через Documents UI (некоторые файловые менеджеры)
         try {
-            val uri = FileProvider.getUriForFile(context, authority, dir)
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
-                addCategory(Intent.CATEGORY_DEFAULT)
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            }
-            if (intent.resolveActivity(context.packageManager) != null) {
-                context.startActivity(Intent.createChooser(intent, "Открыть папку"))
-                return null
-            }
-        } catch (_: Exception) {
-            /* next */
-        }
-
-        // 3) Открыть любой файл из папки — пользователь увидит каталог в «Назад»
-        dir.listFiles()?.maxByOrNull { it.lastModified() }?.let { newest ->
-            try {
-                val uri = FileProvider.getUriForFile(context, authority, newest)
-                val mime = if (newest.extension.lowercase() in videoExt) "video/*" else "audio/*"
+            val path = dir.absolutePath
+            val prefix = "/storage/emulated/0/"
+            if (path.startsWith(prefix)) {
+                val relative = path.removePrefix(prefix)
+                val docId = "primary:$relative"
+                val encoded = URLEncoder.encode(docId, Charsets.UTF_8.name())
+                    .replace("+", "%20")
+                val docUri = Uri.parse("content://com.android.externalstorage.documents/document/$encoded")
                 val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, mime)
+                    setDataAndType(docUri, DocumentsContract.Document.MIME_TYPE_DIR)
+                    addCategory(Intent.CATEGORY_DEFAULT)
                     addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 if (intent.resolveActivity(context.packageManager) != null) {
-                    context.startActivity(Intent.createChooser(intent, "Файлы в папке Music"))
+                    context.startActivity(Intent.createChooser(intent, "Открыть папку"))
                     return null
                 }
-            } catch (_: Exception) {
-                /* next */
             }
-        }
+        } catch (_: Exception) { /* next */ }
 
+        // 3) Фолбэк — скопировать путь в буфер обмена
         copyPath(context, dir.absolutePath)
         return dir.absolutePath
-    }
-
-    private fun buildStorageDocumentUri(dir: File): Uri? {
-        val path = dir.absolutePath
-        val prefix = "/storage/emulated/0/"
-        if (!path.startsWith(prefix)) return null
-        val relative = path.removePrefix(prefix)
-        val docId = "primary:$relative"
-        val encoded = URLEncoder.encode(docId, Charsets.UTF_8.name())
-            .replace("+", "%20")
-        return Uri.parse("content://com.android.externalstorage.documents/document/$encoded")
     }
 
     private fun copyPath(context: Context, path: String) {
