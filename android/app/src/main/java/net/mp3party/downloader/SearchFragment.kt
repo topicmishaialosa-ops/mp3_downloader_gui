@@ -1,6 +1,10 @@
 package net.mp3party.downloader
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -341,14 +345,16 @@ class SearchFragment : Fragment() {
         else -> "треков"
     }
 
-    private fun shareTrack(track: Track) {
-        val impe = buildString {
-            appendLine("source=${track.source.name}")
-            appendLine("id=${track.id}")
-            appendLine("artist=${track.artist}")
-            appendLine("title=${track.title}")
-            appendLine("url=${track.streamUrl}")
-        }
+    private fun impeString(track: Track): String = buildString {
+        appendLine("source=${track.source.name}")
+        appendLine("id=${track.id}")
+        appendLine("artist=${track.artist}")
+        appendLine("title=${track.title}")
+        appendLine("url=${track.streamUrl}")
+    }
+
+    private fun shareTrackAsFile(track: Track) {
+        val impe = impeString(track)
         try {
             val dir = java.io.File(requireContext().cacheDir, "impe")
             dir.mkdirs()
@@ -367,6 +373,82 @@ class SearchFragment : Fragment() {
             startActivity(Intent.createChooser(shareIntent, getString(R.string.share_track)))
         } catch (_: Exception) {
             Snackbar.make(binding.root, "Не удалось поделиться", Snackbar.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun shareTrack(track: Track) {
+        val options = arrayOf("📁 Сохранить как .impe", "☁ Загрузить на сервер")
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("${track.artist} — ${track.title}")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> shareTrackAsFile(track)
+                    1 -> showShareUploadDialog(track)
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun showShareUploadDialog(track: Track) {
+        val impe = impeString(track)
+        val ttlLayout = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(EditText(requireContext()).apply {
+                hint = "Время жизни (мин)"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setText("5")
+                id = android.R.id.text1
+            })
+            addView(EditText(requireContext()).apply {
+                hint = "Макс. использований (0 = безлимит)"
+                inputType = android.text.InputType.TYPE_CLASS_NUMBER
+                setText("0")
+                id = android.R.id.text2
+            })
+        }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("☁ Загрузить на сервер")
+            .setView(ttlLayout)
+            .setPositiveButton("Загрузить") { _, _ ->
+                val ttl = (ttlLayout.findViewById<EditText>(android.R.id.text1).text.toString().toIntOrNull() ?: 5).coerceIn(1, 60)
+                val maxUses = (ttlLayout.findViewById<EditText>(android.R.id.text2).text.toString().toIntOrNull() ?: 0).coerceIn(0, 100)
+                doShareUpload(track, impe, ttl, maxUses)
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun doShareUpload(track: Track, impe: String, ttl: Int, maxUses: Int) {
+        lifecycleScope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    val client = okhttp3.OkHttpClient()
+                    val json = org.json.JSONObject().apply {
+                        put("content", impe)
+                        put("ttl_minutes", ttl)
+                        put("max_uses", maxUses)
+                    }
+                    val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val request = okhttp3.Request.Builder()
+                        .url("https://krasava.xyz/api/share")
+                        .post(body)
+                        .build()
+                    val response = client.newCall(request).execute()
+                    val responseBody = response.body?.string() ?: return@withContext null
+                    val obj = org.json.JSONObject(responseBody)
+                    obj.optString("url").takeIf { it.isNotEmpty() }
+                }
+                if (result != null) {
+                    val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(ClipData.newPlainText("share_url", result))
+                    Snackbar.make(binding.root, "✅ Ссылка скопирована: $result", Snackbar.LENGTH_LONG).show()
+                } else {
+                    Snackbar.make(binding.root, "❌ Ошибка загрузки на сервер", Snackbar.LENGTH_SHORT).show()
+                }
+            } catch (_: Exception) {
+                Snackbar.make(binding.root, "❌ Ошибка сети", Snackbar.LENGTH_SHORT).show()
+            }
         }
     }
 

@@ -18,9 +18,16 @@
 #include <QPushButton>
 #include <QCheckBox>
 #include <QSlider>
+#include <QSpinBox>
 #include <QTabWidget>
+#include <QClipboard>
 #include <QDir>
 #include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -136,16 +143,13 @@ void MainWindow::setupUi() {
         const int row = m_libraryList->currentRow();
         if (row < 0 || row >= m_library.size()) return;
         const auto &f = m_library[row];
-        const QString impe = QStringLiteral("source=Local\nid=\nartist=\ntitle=%1\nurl=file://%2\n")
-            .arg(f.displayName, f.path);
-        const QString outPath = m_folderEdit->text() + QStringLiteral("/") + f.displayName + QStringLiteral(".impe");
-        QFile fOut(outPath);
-        if (fOut.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            fOut.write(impe.toUtf8());
-            fOut.close();
-            onLog(QStringLiteral("📁 .impe сохранён: %1").arg(outPath));
-            QDesktopServices::openUrl(QUrl::fromLocalFile(m_folderEdit->text()));
-        }
+        Track t;
+        t.id.clear();
+        t.artist.clear();
+        t.title = f.displayName;
+        t.url = f.path;
+        t.source = DownloadSource::Local;
+        showShareDialog(t);
     });
     libTop->addWidget(refreshBtn);
     libTop->addWidget(openBtn);
@@ -646,6 +650,7 @@ Track MainWindow::parseImpeFile(const QString &path) {
             else if (val == QLatin1String("DriveMusic")) t.source = DownloadSource::DriveMusic;
             else if (val == QLatin1String("PesniMe")) t.source = DownloadSource::PesniMe;
             else if (val == QLatin1String("YouTube")) t.source = DownloadSource::YtDlp;
+            else if (val == QLatin1String("Local")) t.source = DownloadSource::Local;
         } else if (key == QLatin1String("id")) t.id = val;
         else if (key == QLatin1String("artist")) t.artist = val;
         else if (key == QLatin1String("title")) t.title = val;
@@ -661,6 +666,7 @@ void MainWindow::showImpeDialog(const Track &track) {
         case DownloadSource::DriveMusic: return QStringLiteral("DriveMusic");
         case DownloadSource::PesniMe: return QStringLiteral("Pesni.me");
         case DownloadSource::YtDlp: return QStringLiteral("YouTube (yt-dlp)");
+        case DownloadSource::Local: return QStringLiteral("Local");
         }
         return QStringLiteral("?");
     }();
@@ -698,6 +704,110 @@ void MainWindow::showImpeDialog(const Track &track) {
         dlg.accept();
     });
     connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+    dlg.exec();
+}
+
+static QString downloadSourceToImpeName(DownloadSource s);
+
+void MainWindow::showShareDialog(const Track &track) {
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("🔗 Поделиться — %1 — %2").arg(track.artist, track.title));
+    dlg.resize(420, 280);
+    auto *lay = new QVBoxLayout(&dlg);
+
+    auto *label = new QLabel(QStringLiteral("<b>%1 — %2</b>").arg(track.artist.toHtmlEscaped(), track.title.toHtmlEscaped()));
+    label->setWordWrap(true);
+    lay->addWidget(label);
+    lay->addSpacing(8);
+
+    auto *fileBtn = new QPushButton(QStringLiteral("📁 Сохранить как .impe"));
+    auto *serverGroup = new QGroupBox(QStringLiteral("☁ Загрузить на сервер"));
+    auto *svLay = new QVBoxLayout(serverGroup);
+    auto *ttlRow = new QHBoxLayout();
+    ttlRow->addWidget(new QLabel(QStringLiteral("Время жизни:")));
+    QSpinBox *ttlSpin = new QSpinBox();
+    ttlSpin->setRange(1, 60);
+    ttlSpin->setValue(5);
+    ttlSpin->setSuffix(QStringLiteral(" мин"));
+    ttlRow->addWidget(ttlSpin);
+    svLay->addLayout(ttlRow);
+    auto *usesRow = new QHBoxLayout();
+    usesRow->addWidget(new QLabel(QStringLiteral("Макс. использований:")));
+    QSpinBox *usesSpin = new QSpinBox();
+    usesSpin->setRange(0, 100);
+    usesSpin->setValue(0);
+    usesSpin->setSpecialValueText(QStringLiteral("Безлимит"));
+    usesRow->addWidget(usesSpin);
+    svLay->addLayout(usesRow);
+    QPushButton *uploadBtn = new QPushButton(QStringLiteral("☁ Загрузить"));
+    svLay->addWidget(uploadBtn);
+
+    auto *closeBtn = new QPushButton(QStringLiteral("✕ Закрыть"));
+
+    lay->addWidget(fileBtn);
+    lay->addWidget(serverGroup);
+    lay->addStretch();
+    auto *btnRow = new QHBoxLayout();
+    btnRow->addStretch();
+    btnRow->addWidget(closeBtn);
+    lay->addLayout(btnRow);
+
+    connect(fileBtn, &QPushButton::clicked, &dlg, [this, track, &dlg]() {
+        const QString impe = QStringLiteral("source=%1\nid=%2\nartist=%3\ntitle=%4\nurl=%5\n").arg(downloadSourceToImpeName(track.source), track.id, track.artist, track.title, track.url);
+        const QString name = QStringLiteral("%1_%2.impe").arg(track.artist, track.title);
+        const QString path = QDir::temp().absoluteFilePath(name);
+        QFile f(path);
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            f.write(impe.toUtf8());
+            f.close();
+        }
+        QDesktopServices::openUrl(QUrl::fromLocalFile(QDir::temp().absolutePath()));
+        dlg.accept();
+    });
+
+    connect(uploadBtn, &QPushButton::clicked, &dlg, [this, track, ttlSpin, usesSpin, uploadBtn, &dlg]() {
+        const QString impe = QStringLiteral("source=%1\nid=%2\nartist=%3\ntitle=%4\nurl=%5\n").arg(downloadSourceToImpeName(track.source), track.id, track.artist, track.title, track.url);
+        const int ttl = ttlSpin->value();
+        const int maxUses = usesSpin->value();
+
+        uploadBtn->setEnabled(false);
+        uploadBtn->setText(QStringLiteral("⏳ Загрузка…"));
+
+        QJsonObject body;
+        body[QStringLiteral("content")] = impe;
+        body[QStringLiteral("ttl_minutes")] = ttl;
+        body[QStringLiteral("max_uses")] = maxUses;
+
+        auto *nam = new QNetworkAccessManager(this);
+        QNetworkRequest req(QUrl(QStringLiteral("https://krasava.xyz/api/share")));
+        req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+        auto *reply = nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+        connect(reply, &QNetworkReply::finished, &dlg, [this, reply, nam, uploadBtn, &dlg]() {
+            reply->deleteLater();
+            nam->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                uploadBtn->setText(QStringLiteral("☁ Ошибка"));
+                uploadBtn->setEnabled(true);
+                QMessageBox::warning(&dlg, QStringLiteral("Ошибка"), reply->errorString());
+                return;
+            }
+            const QJsonDocument doc = QJsonDocument::fromJson(reply->readAll());
+            const QString url = doc.object()[QStringLiteral("url")].toString();
+            if (url.isEmpty()) {
+                uploadBtn->setText(QStringLiteral("☁ Ошибка"));
+                uploadBtn->setEnabled(true);
+                return;
+            }
+            // Show result
+            uploadBtn->setText(QStringLiteral("✅ Ссылка скопирована"));
+            QApplication::clipboard()->setText(url);
+            QMessageBox::information(&dlg, QStringLiteral("✅ Ссылка создана"),
+                QStringLiteral("Ссылка скопирована в буфер обмена:\n%1").arg(url));
+            dlg.accept();
+        });
+    });
+
+    connect(closeBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
     dlg.exec();
 }
 
@@ -746,19 +856,15 @@ static void shareTrackAsImpe(const Track &track) {
 
 void MainWindow::onShareTracks() {
     const auto items = m_resultsList->selectedItems();
+    const Track *track = nullptr;
     if (items.isEmpty() && m_resultsList->currentRow() >= 0) {
         const int row = m_resultsList->currentRow();
-        if (row >= 0 && row < m_tracks.size()) {
-            shareTrackAsImpe(m_tracks[row]);
-        }
-    } else {
-        for (auto *item : items) {
-            const int row = m_resultsList->row(item);
-            if (row >= 0 && row < m_tracks.size()) {
-                shareTrackAsImpe(m_tracks[row]);
-            }
-        }
+        if (row >= 0 && row < m_tracks.size()) track = &m_tracks[row];
+    } else if (!items.isEmpty()) {
+        const int row = m_resultsList->row(items.first());
+        if (row >= 0 && row < m_tracks.size()) track = &m_tracks[row];
     }
+    if (track) showShareDialog(*track);
 }
 
 void MainWindow::startStream(const Track &track) {

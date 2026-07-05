@@ -54,6 +54,7 @@ public:
     void startStreamFromTrack(const Track &track);
     void addToPlaylistFromTrack(const Track &track);
     static Track parseImpeFile(const QString &path);
+    void showShareDialog(const Track &track);
     void showImpeDialog(const Track &track);
 
 private:

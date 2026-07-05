@@ -1,4 +1,5 @@
 /target/
+share-server/target/
 **/build/
 qt/build-fresh/
 **/.gradle/

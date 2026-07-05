@@ -53,6 +53,7 @@ const MIN_DOWNLOAD_BYTES: u64 = 50 * 1024;
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 const MAX_LOG_LINES: usize = 2000;
+const SHARE_SERVER_URL: &str = "https://krasava.xyz/api/share";
 const YTDLP_SEARCH_TIMEOUT_SECS: u64 = 45;
 const LOADING_WATCHDOG_SECS: u64 = 90;
 
@@ -422,6 +423,13 @@ struct LinkParserApp {
     stream_rx: Option<mpsc::Receiver<Result<(String, String, String, bool), String>>>,
     impe_to_handle: Option<(TrackInfo, DownloadSource)>,
     impe_file_path: Option<PathBuf>,
+    show_share_dialog: bool,
+    share_track: Option<(TrackInfo, DownloadSource)>,
+    share_ttl: u32,
+    share_max_uses: u32,
+    share_uploading: bool,
+    share_result_url: Option<String>,
+    share_result_mutex: Option<Arc<Mutex<Option<String>>>>,
 }
 
 impl Default for LinkParserApp {
@@ -464,6 +472,13 @@ impl Default for LinkParserApp {
             stream_rx: None,
             impe_to_handle: None,
             impe_file_path: None,
+            show_share_dialog: false,
+            share_track: None,
+            share_ttl: 5,
+            share_max_uses: 0,
+            share_uploading: false,
+            share_result_url: None,
+            share_result_mutex: None,
         }
     }
 }
@@ -1576,21 +1591,19 @@ impl LinkParserApp {
                                 self.player.add_to_playlist(item);
                                 self.status = format!("➕ {} добавлен в плейлист", f.display_name);
                             }
-                            if ui.add(theme.neutral_button("🔗")).on_hover_text("Поделиться (.impe)").clicked() {
-                                let name = f.display_name.clone();
-                                let path = f.path.to_string_lossy().to_string();
-                                let impe = format!(
-                                    "source=Local\nid=\nartist=\ntitle={}\nurl=file://{}\n",
-                                    name, path
-                                );
-                                let out = self.downloads_folder.join(format!("{}.impe", name));
-                                if std::fs::write(&out, &impe).is_ok() {
-                                    self.impe_file_path = Some(out.clone());
-                                    self.status = format!("📁 .impe сохранён: {}", out.display());
-                                    let _ = std::process::Command::new("xdg-open")
-                                        .arg(out.parent().unwrap_or(Path::new(".")))
-                                        .spawn();
-                                }
+                            if ui.add(theme.neutral_button("🔗")).on_hover_text("Поделиться").clicked() {
+                                let track = TrackInfo {
+                                    id: String::new(),
+                                    artist: String::new(),
+                                    title: f.display_name.clone(),
+                                    url: f.path.to_string_lossy().to_string(),
+                                };
+                                self.share_track = Some((track, DownloadSource::Mp3Party));
+                                self.share_ttl = 5;
+                                self.share_max_uses = 0;
+                                self.share_result_url = None;
+                                self.share_uploading = false;
+                                self.show_share_dialog = true;
                             }
                         });
                         ui.separator();
@@ -3490,6 +3503,28 @@ impl eframe::App for LinkParserApp {
                 });
         }
 
+        if self.show_share_dialog {
+            let title = if self.share_result_url.is_some() {
+                "🔗 Ссылка создана"
+            } else {
+                "🔗 Поделиться треком"
+            };
+            egui::Window::new(title)
+                .id("share_dialog".into())
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .resizable(false)
+                .collapsible(false)
+                .frame(
+                    Frame::window(&ctx.style())
+                        .fill(theme.card_bg)
+                        .stroke(Stroke::new(1.0, theme.card_border))
+                        .rounding(Rounding::same(10.0)),
+                )
+                .show(ctx, |ui| {
+                    self.show_share_panel(ui, theme);
+                });
+        }
+
         // Keyboard shortcuts
         ctx.input(|i| {
             if self.player.state.has_media {
@@ -4084,22 +4119,16 @@ impl LinkParserApp {
                                                     .neutral_button("🔗")
                                                     .min_size(Vec2::new(36.0, 24.0)),
                                             )
-                                            .on_hover_text("Поделиться (.impe)")
+                                            .on_hover_text("Поделиться")
                                             .clicked()
                                         {
-                                            let track = &self.tracks[*i];
-                                            match write_impe_file(track, self.download_source) {
-                                                Ok(path) => {
-                                                    self.impe_file_path = Some(path.clone());
-                                                    self.status = format!("📁 .impe сохранён: {}", path.display());
-                                                    let _ = std::process::Command::new("xdg-open")
-                                                        .arg(path.parent().unwrap_or(Path::new(".")))
-                                                        .spawn();
-                                                }
-                                                Err(e) => {
-                                                    self.status = format!("❌ .impe: {}", e);
-                                                }
-                                            }
+                                            let track = self.tracks[*i].clone();
+                                            self.share_track = Some((track, self.download_source));
+                                            self.share_ttl = 5;
+                                            self.share_max_uses = 0;
+                                            self.share_result_url = None;
+                                            self.share_uploading = false;
+                                            self.show_share_dialog = true;
                                         }
                                     });
 
@@ -4629,6 +4658,111 @@ impl LinkParserApp {
                 self.impe_to_handle = None;
             }
         });
+    }
+
+    fn show_share_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        if let Some(ref result_url) = self.share_result_url {
+            ui.label(egui::RichText::new("✅ Ссылка создана!").size(14.0).color(theme.success));
+            ui.add_space(6.0);
+            ui.label(egui::RichText::new(result_url).size(12.0).color(theme.link));
+            ui.add_space(4.0);
+            ui.label(egui::RichText::new("Ссылка скопирована в буфер обмена").size(11.0).color(theme.text_muted));
+            ui.add_space(10.0);
+            if ui.add(theme.neutral_button("✕ Закрыть")).clicked() {
+                self.show_share_dialog = false;
+                self.share_result_url = None;
+            }
+            return;
+        }
+
+        let (ref track, ref source) = match self.share_track {
+            Some(ref t) => t,
+            None => { self.show_share_dialog = false; return; }
+        };
+
+        ui.label(egui::RichText::new(format!("{} — {}", track.artist, track.title)).size(14.0).strong());
+        ui.add_space(8.0);
+
+        if ui.add(theme.neutral_button("📁 Сохранить как .impe")).clicked() {
+            let impe = format!(
+                "source={}\nid={}\nartist={}\ntitle={}\nurl={}\n",
+                source.impe_name(), track.id, track.artist, track.title, track.url,
+            );
+            let fname = format!("{}_{}.impe", track.artist.replace(' ', "_"), track.title.replace(' ', "_"));
+            let out = self.downloads_folder.join(&fname);
+            if std::fs::write(&out, &impe).is_ok() {
+                self.impe_file_path = Some(out.clone());
+                self.status = format!("📁 .impe сохранён: {}", out.display());
+                let _ = std::process::Command::new("xdg-open")
+                    .arg(out.parent().unwrap_or(Path::new("."))).spawn();
+            }
+            self.show_share_dialog = false;
+            return;
+        }
+
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        ui.label(egui::RichText::new("☁ Загрузить на сервер").size(13.0).strong());
+        ui.horizontal(|ui| {
+            ui.label("Время жизни:");
+            ui.add(egui::Slider::new(&mut self.share_ttl, 1..=60).text("мин"));
+        });
+        ui.horizontal(|ui| {
+            ui.label("Макс. использований:");
+            ui.add(egui::Slider::new(&mut self.share_max_uses, 0..=100).text("0 = безлимит"));
+        });
+        ui.add_space(6.0);
+
+        ui.horizontal(|ui| {
+            if self.share_uploading {
+                ui.add(egui::Spinner::new());
+                ui.label("Загрузка…");
+            }
+            if !self.share_uploading {
+                if ui.add(theme.success_button("☁ Загрузить")).clicked() {
+                    let impe = format!(
+                        "source={}\nid={}\nartist={}\ntitle={}\nurl={}\n",
+                        source.impe_name(), track.id, track.artist, track.title, track.url,
+                    );
+                    let ttl = self.share_ttl;
+                    let max_uses = self.share_max_uses;
+                    let result = Arc::new(Mutex::new(None::<String>));
+                    self.share_result_mutex = Some(result.clone());
+                    self.share_uploading = true;
+                    thread::spawn(move || {
+                        let client = reqwest::blocking::Client::new();
+                        let body = serde_json::json!({
+                            "content": impe,
+                            "ttl_minutes": ttl,
+                            "max_uses": max_uses,
+                        });
+                        let url = match client.post(SHARE_SERVER_URL).json(&body).send() {
+                            Ok(resp) => resp.json::<serde_json::Value>().ok()
+                                .and_then(|v| v["url"].as_str().map(String::from)),
+                            Err(_) => None,
+                        };
+                        *result.lock().unwrap() = url;
+                    });
+                }
+                if ui.add(theme.neutral_button("✕ Отмена")).clicked() {
+                    self.show_share_dialog = false;
+                }
+            }
+        });
+
+        if self.share_uploading {
+            if let Some(ref result) = self.share_result_mutex {
+                if let Some(url) = result.lock().unwrap().take() {
+                    self.share_result_url = Some(url.clone());
+                    self.share_uploading = false;
+                    ui.output_mut(|o| o.copied_text = url);
+                    self.status = "✅ Ссылка скопирована в буфер обмена".into();
+                }
+            }
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+        }
     }
 }
 
