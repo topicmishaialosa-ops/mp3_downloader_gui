@@ -33,6 +33,8 @@
 #include <QVBoxLayout>
 #include <QtConcurrent>
 
+static Track parseImpeData(const QString &text);
+
 #include "drivemusicapi.h"
 #include "mp3partyapi.h"
 #include "paths.h"
@@ -108,15 +110,63 @@ void MainWindow::setupUi() {
     connect(addPlaylistBtn, &QPushButton::clicked, this, &MainWindow::onAddToPlaylist);
     connect(shareBtn, &QPushButton::clicked, this, &MainWindow::onShareTracks);
     connect(importBtn, &QPushButton::clicked, this, [this]() {
-        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Выберите .impe файл"),
-            QString(), QStringLiteral("IMPE (*.impe);;Все файлы (*)"));
-        if (path.isEmpty()) return;
-        Track t = parseImpeFile(path);
-        if (t.id.isEmpty()) {
-            QMessageBox::warning(this, QStringLiteral("Ошибка"), QStringLiteral("Не удалось разобрать .impe файл"));
-            return;
-        }
-        showImpeDialog(t);
+        QDialog dlg(this);
+        dlg.setWindowTitle(QStringLiteral("📂 Импорт .impe"));
+        dlg.resize(420, 160);
+        auto *lay = new QVBoxLayout(&dlg);
+        QPushButton *fileBtn = new QPushButton(QStringLiteral("📁 Из файла"));
+        lay->addWidget(fileBtn);
+        auto *urlLay = new QHBoxLayout();
+        QLineEdit *urlEdit = new QLineEdit();
+        urlEdit->setPlaceholderText(QStringLiteral("https://krasava.xyz/api/share/..."));
+        QPushButton *urlBtn = new QPushButton(QStringLiteral("🌐 Загрузить"));
+        urlLay->addWidget(urlEdit);
+        urlLay->addWidget(urlBtn);
+        lay->addLayout(urlLay);
+        QPushButton *cancelBtn = new QPushButton(QStringLiteral("✕ Отмена"));
+        lay->addWidget(cancelBtn);
+        connect(fileBtn, &QPushButton::clicked, &dlg, [this, &dlg]() {
+            const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Выберите .impe файл"),
+                QString(), QStringLiteral("IMPE (*.impe);;Все файлы (*)"));
+            if (path.isEmpty()) return;
+            Track t = parseImpeFile(path);
+            if (t.id.isEmpty()) {
+                QMessageBox::warning(this, QStringLiteral("Ошибка"), QStringLiteral("Не удалось разобрать .impe файл"));
+                return;
+            }
+            showImpeDialog(t);
+            dlg.accept();
+        });
+        connect(urlBtn, &QPushButton::clicked, &dlg, [this, urlEdit, &dlg]() {
+            const QString url = urlEdit->text().trimmed();
+            if (url.isEmpty()) return;
+            QDialog loadingDlg(&dlg);
+            loadingDlg.setWindowTitle(QStringLiteral("🌐 Загрузка…"));
+            loadingDlg.resize(300, 80);
+            auto *layL = new QVBoxLayout(&loadingDlg);
+            layL->addWidget(new QLabel(QStringLiteral("Загрузка .impe с сервера…")));
+            QNetworkAccessManager nam;
+            QNetworkRequest req(url);
+            QNetworkReply *reply = nam.get(req);
+            QObject::connect(reply, &QNetworkReply::finished, &loadingDlg, &QDialog::accept);
+            if (loadingDlg.exec() != QDialog::Accepted || reply->error() != QNetworkReply::NoError) {
+                if (reply->error() != QNetworkReply::NoError)
+                    QMessageBox::warning(&dlg, QStringLiteral("Ошибка"), reply->errorString());
+                reply->deleteLater();
+                return;
+            }
+            const QString text = QString::fromUtf8(reply->readAll());
+            reply->deleteLater();
+            Track t = parseImpeData(text);
+            if (t.id.isEmpty()) {
+                QMessageBox::warning(&dlg, QStringLiteral("Ошибка"), QStringLiteral("Не удалось разобрать .impe"));
+                return;
+            }
+            showImpeDialog(t);
+            dlg.accept();
+        });
+        connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+        dlg.exec();
     });
     btnRow->addWidget(dlSel);
     btnRow->addWidget(streamBtn);
@@ -634,13 +684,10 @@ void MainWindow::onAddToPlaylist() {
     }
 }
 
-Track MainWindow::parseImpeFile(const QString &path) {
+static Track parseImpeData(const QString &text) {
     Track t;
-    QFile f(path);
-    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return t;
-    QTextStream in(&f);
-    while (!in.atEnd()) {
-        const QString line = in.readLine().trimmed();
+    const auto lines = text.split(QLatin1Char('\n'), Qt::SkipEmptyParts);
+    for (const QString &line : lines) {
         const int eq = line.indexOf(QLatin1Char('='));
         if (eq < 0) continue;
         const QString key = line.left(eq).trimmed();
@@ -657,6 +704,13 @@ Track MainWindow::parseImpeFile(const QString &path) {
         else if (key == QLatin1String("url")) t.url = val;
     }
     return t;
+}
+
+Track MainWindow::parseImpeFile(const QString &path) {
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return {};
+    QTextStream in(&f);
+    return parseImpeData(in.readAll());
 }
 
 void MainWindow::showImpeDialog(const Track &track) {

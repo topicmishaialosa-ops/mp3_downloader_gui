@@ -54,6 +54,8 @@ const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/53
 
 const MAX_LOG_LINES: usize = 2000;
 const SHARE_SERVER_URL: &str = "https://krasava.xyz/api/share";
+
+
 const YTDLP_SEARCH_TIMEOUT_SECS: u64 = 45;
 const LOADING_WATCHDOG_SECS: u64 = 90;
 
@@ -430,6 +432,8 @@ struct LinkParserApp {
     share_uploading: bool,
     share_result_url: Option<String>,
     share_result_mutex: Option<Arc<Mutex<Option<String>>>>,
+    share_import_url: String,
+    share_import_result: Option<Arc<Mutex<Option<(TrackInfo, DownloadSource)>>>>,
 }
 
 impl Default for LinkParserApp {
@@ -479,6 +483,8 @@ impl Default for LinkParserApp {
             share_uploading: false,
             share_result_url: None,
             share_result_mutex: None,
+            share_import_url: String::new(),
+            share_import_result: None,
         }
     }
 }
@@ -3485,6 +3491,16 @@ impl eframe::App for LinkParserApp {
                 });
         }
 
+        if self.share_import_result.is_some() {
+            let parsed = self.share_import_result.as_ref()
+                .and_then(|r| r.lock().unwrap().take());
+            self.share_import_result = None;
+            self.share_import_url.clear();
+            if let Some(p) = parsed {
+                self.impe_to_handle = Some(p);
+            }
+        }
+
         if let Some((ref track, _src)) = self.impe_to_handle.clone() {
             let title_text = format!("📂 .impe — {} — {}", track.artist, track.title);
             egui::Window::new(&title_text)
@@ -3837,23 +3853,46 @@ impl LinkParserApp {
                         self.show_batch_window = true;
                     }
 
-                    if ui.add(theme.neutral_button("📂 .impe")).on_hover_text("Импортировать .impe файл").clicked() {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .set_title("Выберите .impe файл")
-                            .add_filter("IMPE", &["impe"])
-                            .pick_file()
-                        {
-                            if let Ok(text) = std::fs::read_to_string(&path) {
-                                if let Some(parsed) = parse_impe(&text) {
-                                    self.impe_to_handle = Some(parsed);
+                    ui.horizontal(|ui| {
+                        if ui.add(theme.neutral_button("📂 .impe")).on_hover_text("Импортировать .impe файл").clicked() {
+                            if let Some(path) = rfd::FileDialog::new()
+                                .set_title("Выберите .impe файл")
+                                .add_filter("IMPE", &["impe"])
+                                .pick_file()
+                            {
+                                if let Ok(text) = std::fs::read_to_string(&path) {
+                                    if let Some(parsed) = parse_impe(&text) {
+                                        self.impe_to_handle = Some(parsed);
+                                    } else {
+                                        self.status = "❌ Не удалось разобрать .impe файл".into();
+                                    }
                                 } else {
-                                    self.status = "❌ Не удалось разобрать .impe файл".into();
+                                    self.status = "❌ Не удалось прочитать файл".into();
                                 }
-                            } else {
-                                self.status = "❌ Не удалось прочитать файл".into();
                             }
                         }
-                    }
+                        ui.add(egui::Separator::default().vertical());
+                        ui.add_sized(
+                            [200.0, 28.0],
+                            egui::TextEdit::singleline(&mut self.share_import_url)
+                                .hint_text("https://krasava.xyz/api/share/..."),
+                        );
+                        if ui.add(theme.neutral_button("🌐 Загрузить")).clicked() {
+                            let url = self.share_import_url.clone();
+                            if !url.is_empty() {
+                                let result = Arc::new(Mutex::new(None));
+                                self.share_import_result = Some(result.clone());
+                                thread::spawn(move || {
+                                    let client = reqwest::blocking::Client::new();
+                                    let parsed = match client.get(&url).send() {
+                                        Ok(resp) => resp.text().ok().and_then(|text| parse_impe(&text)),
+                                        Err(_) => None,
+                                    };
+                                    *result.lock().unwrap() = parsed;
+                                });
+                            }
+                        }
+                    });
                 });
             });
         });

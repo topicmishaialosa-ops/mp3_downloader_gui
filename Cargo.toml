@@ -1,6 +1,6 @@
 [package]
 name = "mp3_downloader_gui"
-version = "1.16.6"
+version = "1.17.0"
 edition = "2021"
 
 [dependencies]

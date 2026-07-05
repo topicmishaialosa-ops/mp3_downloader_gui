@@ -109,7 +109,17 @@ class SearchFragment : Fragment() {
             (activity as? MainActivity)?.handleImpeUri(uri)
         }
         binding.impeButton.setOnClickListener {
-            impePicker.launch("*/*")
+            val options = arrayOf("📁 Из файла", "🌐 По ссылке")
+            MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Импорт .impe")
+                .setItems(options) { _, which ->
+                    when (which) {
+                        0 -> impePicker.launch("*/*")
+                        1 -> showImpeUrlDialog()
+                    }
+                }
+                .setNegativeButton("Отмена", null)
+                .show()
         }
 
         updateYtdlpStatus()
@@ -448,6 +458,43 @@ class SearchFragment : Fragment() {
                 }
             } catch (_: Exception) {
                 Snackbar.make(binding.root, "❌ Ошибка сети", Snackbar.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun showImpeUrlDialog() {
+        val editText = EditText(requireContext()).apply {
+            hint = "https://krasava.xyz/api/share/..."
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        MaterialAlertDialogBuilder(requireContext())
+            .setTitle("🌐 Загрузить .impe по ссылке")
+            .setView(editText)
+            .setPositiveButton("Загрузить") { _, _ ->
+                val url = editText.text.toString().trim()
+                if (url.isNotEmpty()) {
+                    loadImpeFromUrl(url)
+                }
+            }
+            .setNegativeButton("Отмена", null)
+            .show()
+    }
+
+    private fun loadImpeFromUrl(url: String) {
+        lifecycleScope.launch {
+            try {
+                val text = withContext(Dispatchers.IO) {
+                    val client = okhttp3.OkHttpClient()
+                    val request = okhttp3.Request.Builder().url(url).get().build()
+                    client.newCall(request).execute().body?.string()
+                }
+                if (text.isNullOrEmpty()) {
+                    Snackbar.make(binding.root, "❌ Пустой ответ", Snackbar.LENGTH_SHORT).show()
+                    return@launch
+                }
+                (activity as? MainActivity)?.handleImpeText(text)
+            } catch (_: Exception) {
+                Snackbar.make(binding.root, "❌ Ошибка загрузки", Snackbar.LENGTH_SHORT).show()
             }
         }
     }

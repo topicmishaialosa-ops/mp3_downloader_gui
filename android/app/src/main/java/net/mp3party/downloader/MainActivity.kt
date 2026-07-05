@@ -353,6 +353,11 @@ class MainActivity : AppCompatActivity() {
         showImpeDialog(track)
     }
 
+    fun handleImpeText(text: String) {
+        val track = parseImpe(text) ?: return
+        showImpeDialog(track)
+    }
+
     private fun handleImpeIntent(intent: Intent?) {
         val uri = intent?.data ?: return
         handleImpeUri(uri)
