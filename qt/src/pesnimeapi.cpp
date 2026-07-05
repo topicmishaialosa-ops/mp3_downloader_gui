@@ -215,7 +215,8 @@ QString PesniMeApi::download(const Track &track,
     const QString cdName = HttpClient::extractFileNameFromDisposition(r.rawHeaders);
     if (!cdName.isEmpty() && (cdName.endsWith(QStringLiteral(".mp3"), Qt::CaseInsensitive)
                               || cdName.endsWith(QStringLiteral(".m4a"), Qt::CaseInsensitive))) {
-        const QString newPath = QDir(folder).filePath(cdName);
+        const QString cleaned = HttpClient::cleanDispositionFilename(cdName);
+        const QString newPath = QDir(folder).filePath(cleaned);
         if (newPath != dest) {
             QFile::rename(dest, newPath);
             return newPath;

@@ -89,6 +89,28 @@ QString HttpClient::extractFileNameFromDisposition(const QByteArray &rawHeaders)
     return {};
 }
 
+QString HttpClient::cleanDispositionFilename(const QString &name) {
+    QString s = name;
+    // Определить расширение
+    QString ext;
+    if (s.endsWith(QStringLiteral(".mp3"), Qt::CaseInsensitive)) ext = QStringLiteral(".mp3");
+    else if (s.endsWith(QStringLiteral(".m4a"), Qt::CaseInsensitive)) ext = QStringLiteral(".m4a");
+    else if (s.endsWith(QStringLiteral(".mp4"), Qt::CaseInsensitive)) ext = QStringLiteral(".mp4");
+    if (!ext.isEmpty()) s.chop(ext.length());
+
+    // Убрать track<digits> в начале
+    QRegularExpression trackRe(QStringLiteral("^track\\d+"), QRegularExpression::CaseInsensitiveOption);
+    s.replace(trackRe, QString());
+    s = s.trimmed();
+
+    // Убрать pesnifm/mp3party/ pesni.me суффиксы в конце
+    QRegularExpression suffixRe(QStringLiteral("\\s*pesni(?:fm|me|party).*$"), QRegularExpression::CaseInsensitiveOption);
+    s.replace(suffixRe, QString());
+    s = s.trimmed();
+
+    return s.isEmpty() ? QStringLiteral("track") + ext : s + ext;
+}
+
 HttpClient::Response HttpClient::downloadToFile(
     const QUrl &url,
     const QString &destPath,

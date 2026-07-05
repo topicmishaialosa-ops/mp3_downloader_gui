@@ -177,7 +177,8 @@ object Mp3PartyApi {
                     val cdHeader = resp.header("Content-Disposition") ?: ""
                     val cdName = extractFileNameFromDisposition(cdHeader)
                     if (cdName != null && cdName.endsWith(".mp3", ignoreCase = true)) {
-                        val renamed = File(destFile.parentFile, cdName)
+                        val cleaned = MusicLibrary.cleanDispositionFilename(cdName)
+                        val renamed = File(destFile.parentFile, cleaned)
                         if (renamed.absolutePath != destFile.absolutePath) {
                             destFile.renameTo(renamed)
                             return renamed.absolutePath

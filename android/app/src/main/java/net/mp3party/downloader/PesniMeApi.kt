@@ -102,7 +102,8 @@ object PesniMeApi {
             val cdName = extractFileNameFromDisposition(cdHeader)
             if (cdName != null && (cdName.endsWith(".mp3", ignoreCase = true) ||
                     cdName.endsWith(".m4a", ignoreCase = true))) {
-                val renamed = File(destFile.parentFile, cdName)
+                val cleaned = MusicLibrary.cleanDispositionFilename(cdName)
+                val renamed = File(destFile.parentFile, cleaned)
                 if (renamed.absolutePath != destFile.absolutePath) {
                     destFile.renameTo(renamed)
                     return renamed.absolutePath

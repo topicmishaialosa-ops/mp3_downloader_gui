@@ -106,6 +106,39 @@ fn sanitize_filename(raw: &str) -> String {
     }
 }
 
+/// Очистить имя из Content-Disposition: убрать track<ID> префикс и pesni.me суффиксы
+fn clean_disposition_filename(name: &str) -> String {
+    let mut s = name.to_string();
+    // Определить расширение
+    let ext = if s.to_lowercase().ends_with(".mp3") { ".mp3" }
+        else if s.to_lowercase().ends_with(".m4a") { ".m4a" }
+        else if s.to_lowercase().ends_with(".mp4") { ".mp4" }
+        else { "" };
+    if !ext.is_empty() {
+        s.truncate(s.len() - ext.len());
+    }
+
+    // Убрать track<digits> в начале
+    if let Some(idx) = s.find(|c: char| !c.is_ascii_digit()) {
+        if idx > 0 && s[..idx].eq_ignore_ascii_case("track") || (idx > 5 && s[..5].eq_ignore_ascii_case("track")) {
+            // track + digits: убираем всё до первого нецифрового символа
+            s = s[idx..].trim_start().to_string();
+        } else if s.starts_with("track") && s.len() > 5 && s[5..].chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            s = s[5..].chars().skip_while(|c| c.is_ascii_digit()).collect::<String>().trim_start().to_string();
+        }
+    }
+    // Более простой regex-подобный подход
+    let track_re = Regex::new(r"(?i)^track\d+\s*").unwrap();
+    s = track_re.replace(&s, "").to_string();
+
+    // Убрать pesnifm/mp3party/ pesni.me суффиксы в конце
+    let suffix_re = Regex::new(r"(?i)\s*pesni(?:fm|me|party).*$").unwrap();
+    s = suffix_re.replace(&s, "").to_string();
+
+    s = s.trim().to_string();
+    if s.is_empty() { format!("track{}", ext) } else { format!("{}{}", s, ext) }
+}
+
 /// Извлечь имя файла из заголовка Content-Disposition (RFC 6266 / RFC 5987)
 fn extract_filename_from_disposition(headers: &reqwest::header::HeaderMap) -> Option<String> {
     let cd = headers.get(reqwest::header::CONTENT_DISPOSITION)?.to_str().ok()?;
@@ -2161,7 +2194,8 @@ impl LinkParserApp {
                 // Переименовать по Content-Disposition
                 let final_path = if let Some(cd_name) = extract_filename_from_disposition(&resp_headers) {
                     if cd_name.ends_with(".mp3") {
-                        let new_path = folder.join(&cd_name);
+                        let cleaned = clean_disposition_filename(&cd_name);
+                        let new_path = folder.join(&cleaned);
                         if new_path != filepath {
                             let _ = std::fs::rename(&filepath, &new_path);
                             new_path
@@ -2496,7 +2530,8 @@ impl LinkParserApp {
                 // Переименовать по Content-Disposition
                 let final_path = if let Some(cd_name) = extract_filename_from_disposition(&resp_headers) {
                     if cd_name.ends_with(".mp3") {
-                        let new_path = folder.join(&cd_name);
+                        let cleaned = clean_disposition_filename(&cd_name);
+                        let new_path = folder.join(&cleaned);
                         if new_path != filepath {
                             let _ = std::fs::rename(&filepath, &new_path);
                             new_path
@@ -2697,7 +2732,8 @@ impl LinkParserApp {
             // Переименовать по Content-Disposition
             let final_path = if let Some(cd_name) = extract_filename_from_disposition(&resp_headers) {
                 if cd_name.ends_with(".mp3") || cd_name.ends_with(".m4a") {
-                    let new_path = folder.join(&cd_name);
+                    let cleaned = clean_disposition_filename(&cd_name);
+                    let new_path = folder.join(&cleaned);
                     if new_path != filepath {
                         let _ = std::fs::rename(&filepath, &new_path);
                         new_path

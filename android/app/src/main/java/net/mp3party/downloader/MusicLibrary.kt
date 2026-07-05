@@ -97,6 +97,27 @@ object MusicLibrary {
         clipboard.setPrimaryClip(ClipData.newPlainText("music_folder", path))
     }
 
+    /** Очистить имя из Content-Disposition: убрать track<ID> префикс и pesni.me суффиксы */
+    fun cleanDispositionFilename(name: String): String {
+        var s = name
+        val ext = when {
+            s.endsWith(".mp3", true) -> ".mp3"
+            s.endsWith(".m4a", true) -> ".m4a"
+            s.endsWith(".mp4", true) -> ".mp4"
+            else -> ""
+        }
+        if (ext.isNotEmpty()) s = s.dropLast(ext.length)
+
+        // Убрать track<digits> в начале
+        s = s.replaceFirst(Regex("^track\\d+", RegexOption.IGNORE_CASE), "").trimStart()
+
+        // Убрать pesnifm/mp3party/ pesni.me суффиксы в конце
+        s = s.replaceFirst(Regex("\\s*pesni(?:fm|me|party).*?$", RegexOption.IGNORE_CASE), "")
+
+        s = s.trim()
+        return if (s.isEmpty()) "track" else "$s$ext"
+    }
+
     fun shareFile(context: Context, file: File): Boolean {
         val uri = FileProvider.getUriForFile(
             context,

@@ -26,4 +26,5 @@ public:
                                    std::function<bool(qint64, qint64)> progress = nullptr);
 
     static QString extractFileNameFromDisposition(const QByteArray &rawHeaders);
+    static QString cleanDispositionFilename(const QString &name);
 };
