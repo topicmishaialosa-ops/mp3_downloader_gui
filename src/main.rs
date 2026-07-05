@@ -430,6 +430,7 @@ struct LinkParserApp {
     share_track: Option<(TrackInfo, DownloadSource)>,
     share_import_url: String,
     share_import_result: Option<Arc<Mutex<Option<(TrackInfo, DownloadSource)>>>>,
+    share_import_done: Option<Arc<AtomicBool>>,
 }
 
 impl Default for LinkParserApp {
@@ -476,6 +477,7 @@ impl Default for LinkParserApp {
             share_track: None,
             share_import_url: String::new(),
             share_import_result: None,
+            share_import_done: None,
         }
     }
 }
@@ -3479,13 +3481,17 @@ impl eframe::App for LinkParserApp {
         }
 
         if let Some(ref r) = self.share_import_result {
-            let parsed = r.lock().unwrap().take();
-            if parsed.is_some() {
+            let done = self.share_import_done.as_ref().map(|d| d.load(std::sync::atomic::Ordering::Acquire)).unwrap_or(false);
+            if done {
+                let parsed = r.lock().unwrap().take();
                 self.share_import_result = None;
+                self.share_import_done = None;
                 self.share_import_url.clear();
-            }
-            if let Some(p) = parsed {
-                self.impe_to_handle = Some(p);
+                if let Some(p) = parsed {
+                    self.impe_to_handle = Some(p);
+                } else {
+                    self.status = "❌ Не удалось загрузить ссылку".into();
+                }
             }
         }
 
@@ -3864,11 +3870,17 @@ impl LinkParserApp {
                         if ui.add(theme.neutral_button("🌐 Загрузить")).clicked() {
                             let url = self.share_import_url.clone();
                             if !url.is_empty() {
+                                self.status = "⏳ Загрузка…".into();
                                 let result = Arc::new(Mutex::new(None));
+                                let done = Arc::new(AtomicBool::new(false));
                                 self.share_import_result = Some(result.clone());
+                                self.share_import_done = Some(done.clone());
                                 thread::spawn(move || {
-                                    let parsed = Self::import_from_url(&url);
+                                    let parsed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                                        LinkParserApp::import_from_url(&url)
+                                    })).ok().flatten();
                                     *result.lock().unwrap() = parsed;
+                                    done.store(true, std::sync::atomic::Ordering::Release);
                                 });
                             }
                         }
