@@ -3,8 +3,6 @@ package net.mp3party.downloader
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
-import okhttp3.MediaType.Companion.toMediaType
-import okhttp3.RequestBody.Companion.toRequestBody
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -111,7 +109,7 @@ class SearchFragment : Fragment() {
         binding.impeButton.setOnClickListener {
             val options = arrayOf("📁 Из файла", "🌐 По ссылке")
             MaterialAlertDialogBuilder(requireContext())
-                .setTitle("Импорт .impe")
+                .setTitle("Импорт")
                 .setItems(options) { _, which ->
                     when (which) {
                         0 -> impePicker.launch("*/*")
@@ -387,7 +385,7 @@ class SearchFragment : Fragment() {
     }
 
     private fun shareTrack(track: Track) {
-        val options = arrayOf("🔗 Копировать прямую ссылку", "📁 Сохранить как .impe", "☁ Загрузить на сервер")
+        val options = arrayOf("🔗 Копировать прямую ссылку", "📁 Сохранить как .impe")
         MaterialAlertDialogBuilder(requireContext())
             .setTitle("${track.artist} — ${track.title}")
             .setItems(options) { _, which ->
@@ -403,96 +401,39 @@ class SearchFragment : Fragment() {
                         Snackbar.make(binding.root, "🔗 Прямая ссылка скопирована", Snackbar.LENGTH_SHORT).show()
                     }
                     1 -> shareTrackAsFile(track)
-                    2 -> showShareUploadDialog(track)
                 }
             }
             .setNegativeButton("Отмена", null)
             .show()
-    }
-
-    private fun showShareUploadDialog(track: Track) {
-        val impe = impeString(track)
-        val ttlLayout = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-            addView(EditText(requireContext()).apply {
-                hint = "Время жизни (мин)"
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                setText("5")
-                id = android.R.id.text1
-            })
-            addView(EditText(requireContext()).apply {
-                hint = "Макс. использований (0 = безлимит)"
-                inputType = android.text.InputType.TYPE_CLASS_NUMBER
-                setText("0")
-                id = android.R.id.text2
-            })
-        }
-        MaterialAlertDialogBuilder(requireContext())
-            .setTitle("☁ Загрузить на сервер")
-            .setView(ttlLayout)
-            .setPositiveButton("Загрузить") { _, _ ->
-                val ttl = (ttlLayout.findViewById<EditText>(android.R.id.text1).text.toString().toIntOrNull() ?: 5).coerceIn(1, 60)
-                val maxUses = (ttlLayout.findViewById<EditText>(android.R.id.text2).text.toString().toIntOrNull() ?: 0).coerceIn(0, 100)
-                doShareUpload(track, impe, ttl, maxUses)
-            }
-            .setNegativeButton("Отмена", null)
-            .show()
-    }
-
-    private fun doShareUpload(track: Track, impe: String, ttl: Int, maxUses: Int) {
-        lifecycleScope.launch {
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    val client = okhttp3.OkHttpClient()
-                    val json = org.json.JSONObject().apply {
-                        put("content", impe)
-                        put("ttl_minutes", ttl)
-                        put("max_uses", maxUses)
-                    }
-                    val body = json.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-                    val request = okhttp3.Request.Builder()
-                        .url("https://krasava.xyz/api/share")
-                        .post(body)
-                        .build()
-                    val response = client.newCall(request).execute()
-                    val responseBody = response.body?.string() ?: return@withContext null
-                    val obj = org.json.JSONObject(responseBody)
-                    obj.optString("url").takeIf { it.isNotEmpty() }
-                }
-                if (result != null) {
-                    val clipboard = requireContext().getSystemService(android.content.Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    clipboard.setPrimaryClip(ClipData.newPlainText("share_url", result))
-                    Snackbar.make(binding.root, "✅ Ссылка скопирована: $result", Snackbar.LENGTH_LONG).show()
-                } else {
-                    Snackbar.make(binding.root, "❌ Ошибка загрузки на сервер", Snackbar.LENGTH_SHORT).show()
-                }
-            } catch (_: Exception) {
-                Snackbar.make(binding.root, "❌ Ошибка сети", Snackbar.LENGTH_SHORT).show()
-            }
-        }
     }
 
     private fun showImpeUrlDialog() {
         val editText = EditText(requireContext()).apply {
-            hint = "https://krasava.xyz/api/share/..."
+            hint = "Ссылка: .impe, YouTube, mp3party.net…"
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
         }
         MaterialAlertDialogBuilder(requireContext())
-            .setTitle("🌐 Загрузить .impe по ссылке")
+            .setTitle("🌐 Импорт по ссылке")
             .setView(editText)
             .setPositiveButton("Загрузить") { _, _ ->
                 val url = editText.text.toString().trim()
                 if (url.isNotEmpty()) {
-                    loadImpeFromUrl(url)
+                    loadUrlToTrack(url)
                 }
             }
             .setNegativeButton("Отмена", null)
             .show()
     }
 
-    private fun loadImpeFromUrl(url: String) {
+    private fun loadUrlToTrack(url: String) {
         lifecycleScope.launch {
             try {
+                val track = withContext(Dispatchers.IO) { detectUrlTrack(requireContext(), url) }
+                if (track != null) {
+                    (activity as? MainActivity)?.showImpeDialog(track)
+                    return@launch
+                }
+
                 val text = withContext(Dispatchers.IO) {
                     val client = okhttp3.OkHttpClient()
                     val request = okhttp3.Request.Builder().url(url).get().build()
@@ -507,6 +448,76 @@ class SearchFragment : Fragment() {
                 Snackbar.make(binding.root, "❌ Ошибка загрузки", Snackbar.LENGTH_SHORT).show()
             }
         }
+    }
+
+    private fun detectUrlTrack(context: android.content.Context, url: String): Track? {
+        val ytRe = Regex("(?:youtube\\.com/watch\\?v=|youtu\\.be/)([a-zA-Z0-9_-]{11})")
+        val ytM = ytRe.find(url)
+        if (ytM != null) {
+            val id = ytM.groupValues[1]
+            return Track(id = id, artist = "", title = "YouTube #${id.take(8)}",
+                streamUrl = "https://www.youtube.com/watch?v=$id", source = DownloadSource.YouTube)
+        }
+
+        if (url.contains("mp3party.net") || url.contains("/download/") || url.contains("/music/")) {
+            val idRe = Regex("(?:/download/|/music/|/track/)(\\d+)|(?:^|/)(\\d+)/?\$")
+            val idM = idRe.find(url)
+            if (idM != null) {
+                val id = idM.groupValues[1].ifEmpty { idM.groupValues[2] }
+                val client = okhttp3.OkHttpClient()
+                val pageUrl = "https://mp3party.net/music/$id"
+                val req = okhttp3.Request.Builder().url(pageUrl)
+                    .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+                    .build()
+                val resp = client.newCall(req).execute()
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: return null
+                    val artistRe = Regex("""data-js-artist-name="([^"]*)"""")
+                    val titleRe = Regex("""data-js-song-title="([^"]*)"""")
+                    val artist = artistRe.find(body)?.groupValues?.getOrNull(1)?.trim() ?: ""
+                    val title = titleRe.find(body)?.groupValues?.getOrNull(1)?.trim() ?: "Track #$id"
+                    return Track(id = id, artist = artist, title = title,
+                        streamUrl = "https://dl2.mp3party.net/online/$id.mp3", source = DownloadSource.MP3Party)
+                }
+            }
+        }
+
+        if (url.contains("pesni.me")) {
+            val idRe = Regex("(?:/track/|/download/)(\\d+)|(?:^|/)(\\d+)/?\$")
+            val idM = idRe.find(url)
+            if (idM != null) {
+                val id = idM.groupValues[1].ifEmpty { idM.groupValues[2] }
+                val client = okhttp3.OkHttpClient()
+                val pageUrl = "https://music.pesni.me/track/$id"
+                val req = okhttp3.Request.Builder().url(pageUrl)
+                    .header("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36")
+                    .build()
+                val resp = client.newCall(req).execute()
+                if (resp.isSuccessful) {
+                    val body = resp.body?.string() ?: return null
+                    val trackRe = Regex(
+                        "\"id\":(\\d+),\"artist\":\"([^\"]*)\",\"title\":\"([^\"]*)\",")
+                    val trM = trackRe.find(body)
+                    if (trM != null) {
+                        val artist = trM.groupValues[2].trim()
+                        val title = trM.groupValues[3].trim()
+                        val playRe = Regex("\"play\":\"([^\"]+)\"")
+                        val playM = playRe.find(body)
+                        val streamUrl = playM?.groupValues?.getOrNull(1) ?: ""
+                        return Track(id = id, artist = artist, title = title,
+                            streamUrl = streamUrl, source = DownloadSource.PesniMe)
+                    }
+                }
+            }
+        }
+
+        if (url.endsWith(".mp3")) {
+            val name = url.substringAfterLast('/')
+            return Track(id = url, artist = "", title = name.removeSuffix(".mp3"),
+                streamUrl = url, source = DownloadSource.MP3Party)
+        }
+
+        return null
     }
 
     fun refreshPlaybackButtons() {

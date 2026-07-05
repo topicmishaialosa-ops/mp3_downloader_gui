@@ -27,6 +27,8 @@ use std::time::{Duration, Instant};
 static RE_ID_EXTRACT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?:/download/|/music/|/track/)(\d+)|(?:^|/)(\d+)/?$").unwrap());
 static RE_DIGITS: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d+$").unwrap());
+static RE_YOUTUBE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?:youtube\.com/watch\?v=|youtu\.be/)([a-zA-Z0-9_-]{11})").unwrap());
 static RE_YTDLP_PERCENT: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(\d{1,3})(?:\.\d+)?%").unwrap());
 static RE_DRIVEMUSIC_MP3: LazyLock<Regex> =
@@ -53,7 +55,6 @@ const MIN_DOWNLOAD_BYTES: u64 = 50 * 1024;
 const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 const MAX_LOG_LINES: usize = 2000;
-const SHARE_SERVER_URL: &str = "https://krasava.xyz/api/share";
 
 
 const YTDLP_SEARCH_TIMEOUT_SECS: u64 = 45;
@@ -427,11 +428,6 @@ struct LinkParserApp {
     impe_file_path: Option<PathBuf>,
     show_share_dialog: bool,
     share_track: Option<(TrackInfo, DownloadSource)>,
-    share_ttl: u32,
-    share_max_uses: u32,
-    share_uploading: bool,
-    share_result_url: Option<String>,
-    share_result_mutex: Option<Arc<Mutex<Option<String>>>>,
     share_import_url: String,
     share_import_result: Option<Arc<Mutex<Option<(TrackInfo, DownloadSource)>>>>,
 }
@@ -478,11 +474,6 @@ impl Default for LinkParserApp {
             impe_file_path: None,
             show_share_dialog: false,
             share_track: None,
-            share_ttl: 5,
-            share_max_uses: 0,
-            share_uploading: false,
-            share_result_url: None,
-            share_result_mutex: None,
             share_import_url: String::new(),
             share_import_result: None,
         }
@@ -1605,10 +1596,6 @@ impl LinkParserApp {
                                     url: f.path.to_string_lossy().to_string(),
                                 };
                                 self.share_track = Some((track, DownloadSource::Mp3Party));
-                                self.share_ttl = 5;
-                                self.share_max_uses = 0;
-                                self.share_result_url = None;
-                                self.share_uploading = false;
                                 self.show_share_dialog = true;
                             }
                         });
@@ -3502,7 +3489,8 @@ impl eframe::App for LinkParserApp {
         }
 
         if let Some((ref track, _src)) = self.impe_to_handle.clone() {
-            let title_text = format!("📂 .impe — {} — {}", track.artist, track.title);
+            let label = if track.artist.is_empty() { track.title.clone() } else { format!("{} — {}", track.artist, track.title) };
+            let title_text = format!("📥 Импорт — {}", label);
             egui::Window::new(&title_text)
                 .id("impe_window".into())
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
@@ -3520,12 +3508,7 @@ impl eframe::App for LinkParserApp {
         }
 
         if self.show_share_dialog {
-            let title = if self.share_result_url.is_some() {
-                "🔗 Ссылка создана"
-            } else {
-                "🔗 Поделиться треком"
-            };
-            egui::Window::new(title)
+            egui::Window::new("🔗 Поделиться")
                 .id("share_dialog".into())
                 .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
                 .resizable(false)
@@ -3875,7 +3858,7 @@ impl LinkParserApp {
                         ui.add_sized(
                             [200.0, 28.0],
                             egui::TextEdit::singleline(&mut self.share_import_url)
-                                .hint_text("https://krasava.xyz/api/share/..."),
+                                .hint_text("https://... (ссылка, .impe, YouTube)"),
                         );
                         if ui.add(theme.neutral_button("🌐 Загрузить")).clicked() {
                             let url = self.share_import_url.clone();
@@ -3883,11 +3866,7 @@ impl LinkParserApp {
                                 let result = Arc::new(Mutex::new(None));
                                 self.share_import_result = Some(result.clone());
                                 thread::spawn(move || {
-                                    let client = reqwest::blocking::Client::new();
-                                    let parsed = match client.get(&url).send() {
-                                        Ok(resp) => resp.text().ok().and_then(|text| parse_impe(&text)),
-                                        Err(_) => None,
-                                    };
+                                    let parsed = Self::import_from_url(&url);
                                     *result.lock().unwrap() = parsed;
                                 });
                             }
@@ -4163,10 +4142,6 @@ impl LinkParserApp {
                                         {
                                             let track = self.tracks[*i].clone();
                                             self.share_track = Some((track, self.download_source));
-                                            self.share_ttl = 5;
-                                            self.share_max_uses = 0;
-                                            self.share_result_url = None;
-                                            self.share_uploading = false;
                                             self.show_share_dialog = true;
                                         }
                                     });
@@ -4599,7 +4574,7 @@ impl LinkParserApp {
 
     fn show_impe_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
         let (track, source) = self.impe_to_handle.as_ref().unwrap().clone();
-        let label = format!("{} — {}", track.artist, track.title);
+        let label = if track.artist.is_empty() { track.title.clone() } else { format!("{} — {}", track.artist, track.title) };
         ui.label(egui::RichText::new(&label).size(16.0).strong());
         ui.add_space(4.0);
         ui.label(egui::RichText::new(format!("Источник: {}", source.label())).size(12.0).color(theme.text_muted));
@@ -4700,20 +4675,6 @@ impl LinkParserApp {
     }
 
     fn show_share_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
-        if let Some(ref result_url) = self.share_result_url {
-            ui.label(egui::RichText::new("✅ Ссылка создана!").size(14.0).color(theme.success));
-            ui.add_space(6.0);
-            ui.label(egui::RichText::new(result_url).size(12.0).color(theme.link));
-            ui.add_space(4.0);
-            ui.label(egui::RichText::new("Ссылка скопирована в буфер обмена").size(11.0).color(theme.text_muted));
-            ui.add_space(10.0);
-            if ui.add(theme.neutral_button("✕ Закрыть")).clicked() {
-                self.show_share_dialog = false;
-                self.share_result_url = None;
-            }
-            return;
-        }
-
         let (ref track, ref source) = match self.share_track {
             Some(ref t) => t,
             None => { self.show_share_dialog = false; return; }
@@ -4733,7 +4694,6 @@ impl LinkParserApp {
             self.show_share_dialog = false;
             return;
         }
-        ui.add_space(4.0);
 
         if ui.add(theme.neutral_button("📁 Сохранить как .impe")).clicked() {
             let impe = format!(
@@ -4752,68 +4712,53 @@ impl LinkParserApp {
             return;
         }
 
-        ui.add_space(4.0);
-        ui.separator();
-        ui.add_space(4.0);
+        if ui.add(theme.neutral_button("✕ Закрыть")).clicked() {
+            self.show_share_dialog = false;
+        }
+    }
 
-        ui.label(egui::RichText::new("☁ Загрузить на сервер").size(13.0).strong());
-        ui.horizontal(|ui| {
-            ui.label("Время жизни:");
-            ui.add(egui::Slider::new(&mut self.share_ttl, 1..=60).text("мин"));
-        });
-        ui.horizontal(|ui| {
-            ui.label("Макс. использований:");
-            ui.add(egui::Slider::new(&mut self.share_max_uses, 0..=100).text("0 = безлимит"));
-        });
-        ui.add_space(6.0);
+    fn import_from_url(url: &str) -> Option<(TrackInfo, DownloadSource)> {
+        if let Some(caps) = RE_YOUTUBE.captures(url) {
+            let id = caps.get(1).unwrap().as_str().to_string();
+            let track = TrackInfo {
+                id: id.clone(),
+                artist: String::new(),
+                title: format!("YouTube #{}", &id[..id.len().min(8)]),
+                url: format!("https://www.youtube.com/watch?v={}", id),
+            };
+            return Some((track, DownloadSource::YtDlp));
+        }
 
-        ui.horizontal(|ui| {
-            if self.share_uploading {
-                ui.add(egui::Spinner::new());
-                ui.label("Загрузка…");
-            }
-            if !self.share_uploading {
-                if ui.add(theme.success_button("☁ Загрузить")).clicked() {
-                    let impe = format!(
-                        "source={}\nid={}\nartist={}\ntitle={}\nurl={}\n",
-                        source.impe_name(), track.id, track.artist, track.title, track.url,
-                    );
-                    let ttl = self.share_ttl;
-                    let max_uses = self.share_max_uses;
-                    let result = Arc::new(Mutex::new(None::<String>));
-                    self.share_result_mutex = Some(result.clone());
-                    self.share_uploading = true;
-                    thread::spawn(move || {
-                        let client = reqwest::blocking::Client::new();
-                        let body = serde_json::json!({
-                            "content": impe,
-                            "ttl_minutes": ttl,
-                            "max_uses": max_uses,
-                        });
-                        let url = match client.post(SHARE_SERVER_URL).json(&body).send() {
-                            Ok(resp) => resp.json::<serde_json::Value>().ok()
-                                .and_then(|v| v["url"].as_str().map(String::from)),
-                            Err(_) => None,
-                        };
-                        *result.lock().unwrap() = url;
-                    });
-                }
-                if ui.add(theme.neutral_button("✕ Отмена")).clicked() {
-                    self.show_share_dialog = false;
+        if url.contains("mp3party.net") || url.contains("/download/") || url.contains("/music/") {
+            if let Some(id) = Self::extract_id(url) {
+                if let Ok(track) = Self::fetch_track_info(&id) {
+                    return Some((track, DownloadSource::Mp3Party));
                 }
             }
-        });
+            if url.ends_with(".mp3") {
+                let name = url.rsplit('/').next().unwrap_or("track");
+                let track = TrackInfo {
+                    id: url.to_string(),
+                    artist: String::new(),
+                    title: name.trim_end_matches(".mp3").to_string(),
+                    url: url.to_string(),
+                };
+                return Some((track, DownloadSource::Mp3Party));
+            }
+        }
 
-        if self.share_uploading {
-            if let Some(ref result) = self.share_result_mutex {
-                if let Some(url) = result.lock().unwrap().take() {
-                    self.share_result_url = Some(url.clone());
-                    self.share_uploading = false;
-                    ui.output_mut(|o| o.copied_text = url);
-                    self.status = "✅ Ссылка скопирована в буфер обмена".into();
+        if url.contains("pesni.me") {
+            if let Some(id) = Self::extract_id(url) {
+                if let Ok(track) = Self::fetch_track_info_pesnime(&id) {
+                    return Some((track, DownloadSource::PesniMe));
                 }
             }
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+        }
+
+        let client = reqwest::blocking::Client::new();
+        match client.get(url).send() {
+            Ok(resp) => resp.text().ok().and_then(|text| parse_impe(&text)),
+            Err(_) => None,
         }
     }
 }

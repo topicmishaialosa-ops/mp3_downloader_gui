@@ -365,9 +365,10 @@ class MainActivity : AppCompatActivity() {
 
     fun showImpeDialog(track: Track) {
         val activity = this
+        val label = if (track.artist.isEmpty()) track.title else "${track.artist} — ${track.title}"
         AlertDialog.Builder(activity)
             .setTitle(R.string.impe_title)
-            .setMessage("${track.artist} — ${track.title}")
+            .setMessage(label)
             .setPositiveButton(R.string.impe_download) { _, _ ->
                 lifecycleScope.launch {
                     showLoading(true, "📥 ${track.artist} — ${track.title}")

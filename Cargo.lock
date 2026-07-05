@@ -2461,7 +2461,6 @@ dependencies = [
  "rfd",
  "rodio",
  "scraper",
- "serde_json",
  "urlencoding",
 ]
 
