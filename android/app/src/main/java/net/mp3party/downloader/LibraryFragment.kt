@@ -1,9 +1,12 @@
 package net.mp3party.downloader
 
+import android.content.Intent
 import android.os.Bundle
+import android.provider.DocumentsContract
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.isVisible
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -15,6 +18,31 @@ class LibraryFragment : Fragment() {
     private var _binding: FragmentLibraryBinding? = null
     private val binding get() = _binding!!
     private lateinit var adapter: LibraryAdapter
+
+    private val openTreeLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            // Переходим в выбранный файловый менеджер на эту папку
+            try {
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, DocumentsContract.Document.MIME_TYPE_DIR)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                startActivity(Intent.createChooser(intent, "Открыть папку"))
+            } catch (_: Exception) {
+                // Если не получилось — просто открываем через SAF
+                try {
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, "resource/folder")
+                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    }
+                    startActivity(intent)
+                } catch (_: Exception) {}
+            }
+        }
+    }
 
     private val playbackListener: (PlaybackManager.PlayerState) -> Unit = { state ->
         activity?.runOnUiThread {
@@ -61,13 +89,10 @@ class LibraryFragment : Fragment() {
         binding.libraryList.adapter = adapter
 
         binding.openFolderButton.setOnClickListener {
-            val fallback = MusicLibrary.openFolder(requireContext())
-            if (fallback != null) {
-                Snackbar.make(
-                    binding.root,
-                    getString(R.string.folder_copy_hint, fallback),
-                    Snackbar.LENGTH_LONG,
-                ).show()
+            val opened = MusicLibrary.openFolder(requireContext())
+            if (!opened) {
+                // Ни один способ не сработал — открыть выбор папки через SAF
+                openTreeLauncher.launch(null)
             }
         }
     }

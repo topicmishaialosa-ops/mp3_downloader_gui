@@ -1,7 +1,5 @@
 package net.mp3party.downloader
 
-import android.content.ClipData
-import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -38,15 +36,15 @@ object MusicLibrary {
 
     /**
      * Открывает папку Music в файловом менеджере.
-     * @return null — успех; иначе текст для Snackbar (путь скопирован в буфер).
+     * @return true если удалось открыть, false — ничего не сработало.
      */
-    fun openFolder(context: Context): String? {
+    fun openFolder(context: Context): Boolean {
         val dir = musicDir(context)
         if (!dir.exists()) dir.mkdirs()
 
         val authority = "${context.packageName}.fileprovider"
 
-        // 1) FileProvider + открытие файла (надёжный способ)
+        // 1) FileProvider + открытие файла
         dir.listFiles()?.filter { it.isFile }
             ?.maxByOrNull { it.lastModified() }?.let { newest ->
                 try {
@@ -59,12 +57,12 @@ object MusicLibrary {
                     }
                     if (intent.resolveActivity(context.packageManager) != null) {
                         context.startActivity(intent)
-                        return null
+                        return true
                     }
                 } catch (_: Exception) { /* next */ }
             }
 
-        // 2) Попробовать открыть через Documents UI (некоторые файловые менеджеры)
+        // 2) Documents UI
         try {
             val path = dir.absolutePath
             val prefix = "/storage/emulated/0/"
@@ -82,19 +80,12 @@ object MusicLibrary {
                 }
                 if (intent.resolveActivity(context.packageManager) != null) {
                     context.startActivity(Intent.createChooser(intent, "Открыть папку"))
-                    return null
+                    return true
                 }
             }
         } catch (_: Exception) { /* next */ }
 
-        // 3) Фолбэк — скопировать путь в буфер обмена
-        copyPath(context, dir.absolutePath)
-        return dir.absolutePath
-    }
-
-    private fun copyPath(context: Context, path: String) {
-        val clipboard = context.getSystemService(ClipboardManager::class.java) ?: return
-        clipboard.setPrimaryClip(ClipData.newPlainText("music_folder", path))
+        return false
     }
 
     /** Очистить имя из Content-Disposition: убрать track<ID> префикс и pesni.me суффиксы */

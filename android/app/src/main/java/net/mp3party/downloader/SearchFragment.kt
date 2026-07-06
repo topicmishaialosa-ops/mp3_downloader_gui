@@ -294,7 +294,8 @@ class SearchFragment : Fragment() {
                             lower.endsWith(".m4a") || lower.endsWith(".ogg") ||
                             lower.endsWith(".flac") || lower.endsWith(".wav") ||
                             lower.contains("/download/") || lower.contains("/dl/online/") ||
-                            lower.contains("pl.pesni.me")
+                            lower.contains("/dl/download/") || lower.contains("pl.pesni.me") ||
+                            lower.contains("dw.pesni.me")
                         if (isDirect) {
                             val raw = url.substringAfterLast('/').substringBeforeLast('.')
                             val filename = sanitizeFilename(raw)
@@ -389,7 +390,7 @@ class SearchFragment : Fragment() {
             return
         }
         val patterns = listOf(".mp3", ".mp4", ".m4a", ".ogg", ".flac", ".wav",
-            "/download/", "/dl/online/", "pl.pesni.me")
+            "/download/", "/dl/online/", "/dl/download/", "pl.pesni.me", "dw.pesni.me")
 
         lifecycleScope.launch {
             val tracks = withContext(Dispatchers.IO) {
