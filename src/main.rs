@@ -71,15 +71,14 @@ fn sanitize_filename(raw: &str) -> String {
         })
         .collect();
     let b64_trimmed = b64_clean.trim_end_matches('=');
-    if b64_trimmed.len() >= 8
-        && b64_trimmed.len() % 4 == 0
-        && b64_trimmed
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/')
-    {
+    let mut padded = b64_trimmed.to_string();
+    while padded.len() % 4 != 0 {
+        padded.push('=');
+    }
+    if b64_trimmed.len() >= 6 {
         if let Ok(decoded) = base64::Engine::decode(
             &base64::engine::general_purpose::STANDARD,
-            b64_trimmed.as_bytes(),
+            padded.as_bytes(),
         ) {
             let text = String::from_utf8_lossy(&decoded).into_owned();
             if text.chars().any(|c| c.is_alphabetic()) && !text.contains('\0') {

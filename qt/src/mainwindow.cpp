@@ -43,13 +43,11 @@ static QString sanitizeFilename(const QString &raw) {
     // 1) URL-декодировать (%D0%A1 → К, + → пробел)
     QString name = QUrl::fromPercentEncoding(raw.toUtf8()).replace(QLatin1Char('+'), QLatin1Char(' '));
 
-    // 2) Попробовать декодировать base64, если похоже на валидный base64
-    QByteArray b64 = name.toUtf8();
-    QRegularExpression b64Re(QStringLiteral("^[A-Za-z0-9+/=_-]{8,}$"));
-    if (b64Re.match(name).hasMatch() && name.length() % 4 == 0) {
-        QByteArray padded = b64.replace('-', '+').replace('_', '/');
-        while (padded.length() % 4 != 0) padded.append('=');
-        QByteArray decoded = QByteArray::fromBase64(padded, QByteArray::Base64Encoding);
+    // 2) Попробовать base64-декодировать
+    QByteArray b64Clean = name.toUtf8().replace('-', '+').replace('_', '/');
+    while (b64Clean.length() % 4 != 0) b64Clean.append('=');
+    if (name.length() >= 6) {
+        QByteArray decoded = QByteArray::fromBase64(b64Clean, QByteArray::Base64Encoding);
         QString text = QString::fromUtf8(decoded);
         QRegularExpression letterRe(QStringLiteral("\\p{L}"));
         if (letterRe.match(text).hasMatch() && !text.contains(QLatin1Char('\0'))) {
