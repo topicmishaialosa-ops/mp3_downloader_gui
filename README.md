@@ -4,6 +4,10 @@
 
 [![Build](https://github.com/topicmishaialosa-ops/mp3_downloader_gui/actions/workflows/build.yml/badge.svg)](https://github.com/topicmishaialosa-ops/mp3_downloader_gui/actions/workflows/build.yml)
 
+## Скриншоты
+
+![Главное()
+
 ## Готовые сборки (Releases)
 
 Скачайте бинарники на странице **[Releases](https://github.com/topicmishaialosa-ops/mp3_downloader_gui/releases)** (без сборки):
