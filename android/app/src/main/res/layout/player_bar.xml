@@ -89,13 +89,34 @@
                 tools:text="Аудио" />
 
             <ImageButton
+                android:id="@+id/shuffleButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Shuffle"
+                android:src="@drawable/ic_shuffle"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toStartOf="@+id/loopButton"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <ImageButton
                 android:id="@+id/loopButton"
                 android:layout_width="40dp"
                 android:layout_height="40dp"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:contentDescription="@string/loop"
-                android:src="@drawable/ic_expand"
-                android:rotation="90"
+                android:src="@drawable/ic_repeat"
+                app:layout_constraintBottom_toBottomOf="parent"
+                app:layout_constraintEnd_toStartOf="@+id/playlistButton"
+                app:layout_constraintTop_toTopOf="parent" />
+
+            <ImageButton
+                android:id="@+id/playlistButton"
+                android:layout_width="40dp"
+                android:layout_height="40dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/playlist"
+                android:src="@drawable/ic_music_note"
                 app:layout_constraintBottom_toBottomOf="parent"
                 app:layout_constraintEnd_toStartOf="@+id/expandButton"
                 app:layout_constraintTop_toTopOf="parent" />

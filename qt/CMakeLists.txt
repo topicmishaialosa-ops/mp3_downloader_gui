@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(mp3_downloader_gui_qt VERSION 1.4.14 LANGUAGES CXX)
+project(mp3_downloader_gui_qt VERSION 1.19.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -23,6 +23,8 @@ qt_add_executable(mp3_downloader_gui_qt
     src/mp3partyapi.h
     src/drivemusicapi.cpp
     src/drivemusicapi.h
+    src/pesnimeapi.cpp
+    src/pesnimeapi.h
     src/ytdlphelper.cpp
     src/ytdlphelper.h
     src/mpvhelper.cpp

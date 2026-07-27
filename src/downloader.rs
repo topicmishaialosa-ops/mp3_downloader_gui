@@ -7,6 +7,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use percent_encoding::percent_decode_str;
+use regex::Regex;
+
 use crate::player::AudioPlayer;
 use crate::types::*;
 use crate::LinkParserApp;
@@ -235,6 +238,14 @@ impl LinkParserApp {
         } else {
             Ok(url)
         }
+    }
+
+    pub fn pesnime_stream_url(track: &TrackInfo) -> Result<String, String> {
+        if track.url.contains("pl.pesni.me") {
+            return Ok(track.url.clone());
+        }
+        let info = Self::fetch_track_info_pesnime(&track.id)?;
+        Ok(info.url)
     }
 
     pub fn drivemusic_stream_url(track: &TrackInfo) -> Result<String, String> {
@@ -859,6 +870,198 @@ impl LinkParserApp {
         });
     }
 
+    pub fn download_track_pesnime(
+        track: TrackInfo,
+        folder: PathBuf,
+        status: Arc<Mutex<DownloadStatus>>,
+        cancel: Arc<AtomicBool>,
+        log_tx: mpsc::Sender<String>,
+    ) {
+        thread::spawn(move || {
+            let fail = |status: &Arc<Mutex<DownloadStatus>>, msg: String| {
+                if Self::is_download_cancelled(&cancel) {
+                    Self::set_download_stopped(&status, &cancel, None);
+                    Self::log_send(&log_tx, "⏹ Pesni.me: скачивание остановлено");
+                    return;
+                }
+                Self::log_send(&log_tx, format!("❌ Pesni.me: {}", msg));
+                let mut s = status.lock().unwrap();
+                *s = DownloadStatus::Failed(msg);
+            };
+
+            let stop_if_cancelled =
+                |status: &Arc<Mutex<DownloadStatus>>, filepath: &Path| -> bool {
+                    if !Self::is_download_cancelled(&cancel) {
+                        return false;
+                    }
+                    let _ = std::fs::remove_file(filepath);
+                    Self::set_download_stopped(status, &cancel, None);
+                    Self::log_send(&log_tx, "⏹ Pesni.me: скачивание остановлено");
+                    true
+                };
+
+            Self::log_send(
+                &log_tx,
+                format!("📥 Pesni.me: {} — {}", track.artist, track.title),
+            );
+
+            let filename = format!(
+                "{} - {}_{}.mp3",
+                track.artist.trim(),
+                track.title.trim(),
+                track.id
+            )
+            .replace(|c: char| "/\\:*?\"<>|".contains(c), "_");
+
+            let filepath = folder.join(&filename);
+            let _ = std::fs::create_dir_all(&folder);
+
+            {
+                let mut s = status.lock().unwrap();
+                *s = DownloadStatus::Downloading {
+                    progress: 0.0,
+                    bytes: 0,
+                    total: 0,
+                };
+            }
+
+            if stop_if_cancelled(&status, &filepath) {
+                return;
+            }
+
+            let download_url = if track.url.contains("dw.pesni.me") {
+                track.url.clone()
+            } else {
+                let info = match Self::fetch_track_info_pesnime(&track.id) {
+                    Ok(i) => i,
+                    Err(e) => {
+                        fail(&status, e);
+                        return;
+                    }
+                };
+                info.url
+            };
+
+            let client = match Self::pesnime_client() {
+                Ok(c) => c,
+                Err(e) => {
+                    fail(&status, e);
+                    return;
+                }
+            };
+
+            if stop_if_cancelled(&status, &filepath) {
+                return;
+            }
+
+            Self::log_send(&log_tx, format!("Pesni.me: скачиваю {}", download_url));
+
+            let resp = match client
+                .get(&download_url)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .header("Referer", &Self::pesnime_track_url(&track.id))
+                .header("Accept", "audio/mpeg,application/octet-stream,*/*;q=0.8")
+                .send()
+            {
+                Ok(r) if r.status().is_success() => r,
+                Ok(r) => {
+                    fail(&status, format!("HTTP {}", r.status()));
+                    return;
+                }
+                Err(e) => {
+                    fail(&status, e.to_string());
+                    return;
+                }
+            };
+
+            let total = resp.content_length().unwrap_or(0);
+            let resp_headers = resp.headers().clone();
+            let mut file = match std::fs::File::create(&filepath) {
+                Ok(f) => f,
+                Err(e) => {
+                    fail(&status, format!("Файл: {}", e));
+                    return;
+                }
+            };
+
+            let mut downloaded: u64 = 0;
+            let mut buffer = [0u8; 8192];
+            let mut reader = resp;
+            let mut read_err = None;
+
+            loop {
+                if stop_if_cancelled(&status, &filepath) {
+                    return;
+                }
+                match reader.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(n) => {
+                        if let Err(e) = file.write_all(&buffer[..n]) {
+                            read_err = Some(format!("Запись: {}", e));
+                            break;
+                        }
+                        downloaded += n as u64;
+                        let progress = if total > 0 {
+                            downloaded as f32 / total as f32
+                        } else {
+                            0.0
+                        };
+                        let mut s = status.lock().unwrap();
+                        *s = DownloadStatus::Downloading {
+                            progress: progress.min(1.0),
+                            bytes: downloaded,
+                            total,
+                        };
+                    }
+                    Err(e) => {
+                        read_err = Some(format!("Чтение: {}", e));
+                        break;
+                    }
+                }
+            }
+            drop(file);
+
+            if let Some(e) = read_err {
+                let _ = std::fs::remove_file(&filepath);
+                fail(&status, e);
+                return;
+            }
+
+            if downloaded < MIN_DOWNLOAD_BYTES {
+                let _ = std::fs::remove_file(&filepath);
+                fail(
+                    &status,
+                    format!(
+                        "файл {} KB — возможно, ссылка устарела",
+                        downloaded.max(1) / 1024
+                    ),
+                );
+                return;
+            }
+
+            let final_path = if let Some(cd_name) = extract_filename_from_disposition(&resp_headers) {
+                if cd_name.ends_with(".mp3") || cd_name.ends_with(".m4a") {
+                    let cleaned = clean_disposition_filename(&cd_name);
+                    let new_path = folder.join(&cleaned);
+                    if new_path != filepath {
+                        let _ = std::fs::rename(&filepath, &new_path);
+                        new_path
+                    } else {
+                        filepath
+                    }
+                } else {
+                    filepath
+                }
+            } else {
+                filepath
+            };
+
+            Self::log_send(&log_tx, format!("✅ Pesni.me: {}", final_path.display()));
+            let mut s = status.lock().unwrap();
+            *s = DownloadStatus::Completed(final_path.to_string_lossy().to_string());
+        });
+    }
+
     pub fn download_track_ytdlp(
         track: TrackInfo,
         folder: PathBuf,
@@ -1070,4 +1273,110 @@ impl LinkParserApp {
             let _ = Command::new("cmd").args(["/C", "start", "", url]).spawn();
         }
     }
+}
+
+// ── Utility functions ──
+
+pub fn sanitize_filename(raw: &str) -> String {
+    let url_decoded = raw.replace('+', " ");
+    let mut name = percent_decode_str(&url_decoded)
+        .decode_utf8()
+        .map(|s| s.into_owned())
+        .unwrap_or_else(|_| url_decoded.to_string());
+
+    let b64_clean: String = name
+        .chars()
+        .map(|c| match c {
+            '-' => '+',
+            '_' => '/',
+            _ => c,
+        })
+        .collect();
+    let b64_trimmed = b64_clean.trim_end_matches('=');
+    let mut padded = b64_trimmed.to_string();
+    while padded.len() % 4 != 0 {
+        padded.push('=');
+    }
+    if b64_trimmed.len() >= 6 {
+        if let Ok(decoded) = base64::Engine::decode(
+            &base64::engine::general_purpose::STANDARD,
+            padded.as_bytes(),
+        ) {
+            let text = String::from_utf8_lossy(&decoded).into_owned();
+            if text.chars().any(|c| c.is_alphabetic()) && !text.contains('\0') {
+                name = text;
+            }
+        }
+    }
+
+    name = name
+        .replace('_', " ")
+        .chars()
+        .filter(|c| c.is_alphanumeric() || c.is_alphabetic() || *c == ' ' || *c == '-' || *c == '+')
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    if name.is_empty() {
+        "track".to_string()
+    } else {
+        name
+    }
+}
+
+pub fn clean_disposition_filename(name: &str) -> String {
+    let mut s = name.to_string();
+    let ext = if s.to_lowercase().ends_with(".mp3") { ".mp3" }
+        else if s.to_lowercase().ends_with(".m4a") { ".m4a" }
+        else if s.to_lowercase().ends_with(".mp4") { ".mp4" }
+        else { "" };
+    if !ext.is_empty() {
+        s.truncate(s.len() - ext.len());
+    }
+
+    if let Some(idx) = s.find(|c: char| !c.is_ascii_digit()) {
+        if idx > 0 && s[..idx].eq_ignore_ascii_case("track") || (idx > 5 && s[..5].eq_ignore_ascii_case("track")) {
+            s = s[idx..].trim_start().to_string();
+        } else if s.starts_with("track") && s.len() > 5 && s[5..].chars().next().map_or(false, |c| c.is_ascii_digit()) {
+            s = s[5..].chars().skip_while(|c| c.is_ascii_digit()).collect::<String>().trim_start().to_string();
+        }
+    }
+    let track_re = Regex::new(r"(?i)^track\d+\s*").unwrap();
+    s = track_re.replace(&s, "").to_string();
+
+    let suffix_re = Regex::new(r"(?i)\s*pesni(?:fm|me|party).*$").unwrap();
+    s = suffix_re.replace(&s, "").to_string();
+
+    s = s.trim().to_string();
+    if s.is_empty() { format!("track{}", ext) } else { format!("{}{}", s, ext) }
+}
+
+pub fn extract_filename_from_disposition(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    let cd = headers.get(reqwest::header::CONTENT_DISPOSITION)?.to_str().ok()?;
+
+    if let Some(idx) = cd.find("filename*=UTF-8''") {
+        let encoded = &cd[idx + 17..];
+        let end = encoded.find(|c: char| c == ';' || c.is_whitespace()).unwrap_or(encoded.len());
+        let value = &encoded[..end];
+        return urlencoding::decode(value).ok().map(|s| s.into_owned());
+    }
+
+    let cd_lower = cd.to_lowercase();
+    if let Some(idx) = cd_lower.find("filename=") {
+        let rest = &cd[idx + 9..].trim();
+        let name = if rest.starts_with('"') {
+            let end = rest[1..].find('"').map(|i| i + 1).unwrap_or(rest.len());
+            &rest[1..end]
+        } else {
+            let end = rest.find(|c: char| c == ';' || c.is_whitespace()).unwrap_or(rest.len());
+            &rest[..end]
+        };
+        if !name.is_empty() {
+            return urlencoding::decode(name).ok().map(|s| s.into_owned());
+        }
+    }
+
+    None
 }

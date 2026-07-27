@@ -492,4 +492,133 @@ impl LinkParserApp {
             Ok(results.into_iter().take(30).collect())
         }
     }
+
+    pub fn pesnime_search_url(query: &str) -> String {
+        format!("{}/search/{}?type=tracks", PESNIME_BASE, urlencoding::encode(query))
+    }
+
+    pub fn pesnime_track_url(id: &str) -> String {
+        format!("{}/track/{}", PESNIME_BASE, id)
+    }
+
+    pub fn pesnime_client() -> Result<reqwest::blocking::Client, String> {
+        reqwest::blocking::Client::builder()
+            .cookie_store(true)
+            .redirect(reqwest::redirect::Policy::limited(8))
+            .timeout(Duration::from_secs(60))
+            .build()
+            .map_err(|e| format!("Ошибка клиента: {}", e))
+    }
+
+    pub fn pesnime_extract_tracks(body: &str) -> Vec<TrackInfo> {
+        let mut results: Vec<TrackInfo> = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for caps in RE_PESNIME_TRACK.captures_iter(body) {
+            let id = caps.get(1).map(|m| m.as_str()).unwrap_or("");
+            let artist = caps.get(2).map(|m| Self::unescape_json(m.as_str())).unwrap_or_default();
+            let title = caps.get(3).map(|m| Self::unescape_json(m.as_str())).unwrap_or_default();
+            let play_url = caps.get(7).map(|m| m.as_str()).unwrap_or("");
+            let download_url = caps.get(8).map(|m| m.as_str()).unwrap_or("");
+            if id.is_empty() || title.is_empty() || !seen.insert(id.to_string()) {
+                continue;
+            }
+            let url = if !download_url.is_empty() {
+                download_url.to_string()
+            } else if !play_url.is_empty() {
+                play_url.to_string()
+            } else {
+                Self::pesnime_track_url(id)
+            };
+            results.push(TrackInfo {
+                id: id.to_string(),
+                artist,
+                title,
+                url,
+            });
+        }
+        results
+    }
+
+    pub fn search_tracks_pesnime(query: &str) -> Result<Vec<TrackInfo>, String> {
+        let url = Self::pesnime_search_url(query);
+
+        let client = Self::pesnime_client()?;
+        let resp = client
+            .get(&url)
+            .header("User-Agent", BROWSER_USER_AGENT)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+            .send()
+            .map_err(|e| format!("Ошибка запроса: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {} при поиске Pesni.me", resp.status()));
+        }
+
+        let body = resp.text().map_err(|e| format!("Ошибка чтения: {}", e))?;
+        let results = Self::pesnime_extract_tracks(&body);
+
+        let words: Vec<String> = query.split_whitespace()
+            .map(|w| w.to_lowercase()).collect();
+        let filter = |t: &TrackInfo| -> bool {
+            let al = t.artist.to_lowercase();
+            let tl = t.title.to_lowercase();
+            words.iter().any(|w| al.starts_with(w) || tl.starts_with(w))
+        };
+
+        let matched: Vec<TrackInfo> = results.iter().filter(|t| filter(t)).cloned().take(30).collect();
+        if !matched.is_empty() {
+            return Ok(matched);
+        }
+
+        if results.is_empty() {
+            let url2 = format!("https://pesni.me/search/{}", urlencoding::encode(query));
+            if let Ok(resp2) = client
+                .get(&url2)
+                .header("User-Agent", BROWSER_USER_AGENT)
+                .send()
+            {
+                if resp2.status().is_success() {
+                    if let Ok(body2) = resp2.text() {
+                        let results2 = Self::pesnime_extract_tracks(&body2);
+                        let matched2: Vec<TrackInfo> = results2.into_iter().filter(|t| filter(t)).take(30).collect();
+                        if !matched2.is_empty() {
+                            return Ok(matched2);
+                        }
+                    }
+                }
+            }
+            Err(format!("Ничего не найдено на Pesni.me по запросу «{}».", query))
+        } else {
+            Ok(results.into_iter().take(30).collect())
+        }
+    }
+
+    pub fn fetch_track_info_pesnime(id: &str) -> Result<TrackInfo, String> {
+        let url = Self::pesnime_track_url(id);
+
+        let client = Self::pesnime_client()?;
+        let resp = client
+            .get(&url)
+            .header("User-Agent", BROWSER_USER_AGENT)
+            .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+            .header("Accept-Language", "ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7")
+            .send()
+            .map_err(|e| format!("Ошибка запроса: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {} для {}", resp.status(), url));
+        }
+
+        let body = resp.text().map_err(|e| format!("Ошибка чтения: {}", e))?;
+        let results = Self::pesnime_extract_tracks(&body);
+
+        results.into_iter().next().ok_or_else(|| {
+            format!("Не удалось распознать трек Pesni.me ID {}", id)
+        })
+    }
+
+    pub fn unescape_json(s: &str) -> String {
+        s.replace("\\\"", "\"").replace("\\n", "\n").replace("\\t", "\t")
+    }
 }

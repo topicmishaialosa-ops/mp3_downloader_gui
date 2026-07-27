@@ -23,9 +23,19 @@ fn main() -> Result<(), eframe::Error> {
         ..Default::default()
     };
 
+    let impe = std::env::args().skip(1).find(|a| a.ends_with(".impe"))
+        .and_then(|path| {
+            let text = std::fs::read_to_string(&path).ok()?;
+            panels::parse_impe(&text)
+        });
+
     eframe::run_native(
         "mp3party_link_parser",
         options,
-        Box::new(|_cc| Ok(Box::new(LinkParserApp::default()))),
+        Box::new(move |_cc| {
+            let mut app = LinkParserApp::default();
+            app.impe_to_handle = impe;
+            Ok(Box::new(app))
+        }),
     )
 }

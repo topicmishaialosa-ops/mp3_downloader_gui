@@ -1,8 +1,10 @@
 package net.mp3party.downloader
 
 import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
 import android.widget.ImageButton
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -70,6 +72,13 @@ class MainActivity : AppCompatActivity() {
                 Snackbar.make(binding.root, msg, Snackbar.LENGTH_LONG).show()
             }
         }
+
+        handleImpeIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handleImpeIntent(intent)
     }
 
     override fun onStart() {
@@ -132,9 +141,16 @@ class MainActivity : AppCompatActivity() {
         playerBarBinding.nextButton.setOnClickListener {
             PlaybackManager.playNext()
         }
+        playerBarBinding.shuffleButton.setOnClickListener {
+            PlaybackManager.toggleShuffle()
+            updateShuffleButton(playerBarBinding.shuffleButton)
+        }
         playerBarBinding.loopButton.setOnClickListener {
             PlaybackManager.advanceLoopMode()
             updateLoopButton(playerBarBinding.loopButton)
+        }
+        playerBarBinding.playlistButton.setOnClickListener {
+            showPlaylistDialog()
         }
         playerBarBinding.seekSlider.addOnChangeListener { _, value, fromUser ->
             if (fromUser) {
@@ -158,12 +174,40 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateLoopButton(btn: ImageButton) {
         val icon = when (PlaybackManager.loopMode) {
-            LoopMode.NoRepeat -> R.drawable.ic_expand
-            LoopMode.RepeatAll -> R.drawable.ic_expand
-            LoopMode.RepeatOne -> R.drawable.ic_expand
+            LoopMode.NoRepeat -> R.drawable.ic_repeat
+            LoopMode.RepeatAll -> R.drawable.ic_repeat
+            LoopMode.RepeatOne -> R.drawable.ic_repeat_one
         }
         btn.setImageResource(icon)
         btn.alpha = if (PlaybackManager.loopMode == LoopMode.NoRepeat) 0.4f else 1.0f
+    }
+
+    private fun updateShuffleButton(btn: ImageButton) {
+        btn.alpha = if (PlaybackManager.shuffle) 1.0f else 0.4f
+    }
+
+    private fun showPlaylistDialog() {
+        val items = PlaybackManager.playlist.toList()
+        if (items.isEmpty()) {
+            Snackbar.make(binding.root, getString(R.string.queue_empty), Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        val labels = items.mapIndexed { i, item ->
+            val prefix = if (i == PlaybackManager.playlistIndex) "▶ " else "  "
+            "$prefix${item.title}"
+        }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(getString(R.string.playlist) + " (${items.size})")
+            .setItems(labels) { _, which ->
+                PlaybackManager.playAt(which)
+            }
+            .setPositiveButton("Очистить") { _, _ ->
+                PlaybackManager.clearPlaylist()
+                PlaybackManager.stop()
+                binding.playerBar.root.isVisible = false
+            }
+            .setNeutralButton("Закрыть", null)
+            .show()
     }
 
     private fun startProgressUpdates() {
@@ -235,6 +279,7 @@ class MainActivity : AppCompatActivity() {
         playerBarBinding.expandButton.isVisible = state.isVideo
         playerBarBinding.seekBlock.isVisible = !state.isVideo
         updateLoopButton(playerBarBinding.loopButton)
+        updateShuffleButton(playerBarBinding.shuffleButton)
     }
 
     private fun animatePlayPauseIcon(button: android.widget.ImageButton, toPause: Boolean) {
@@ -302,13 +347,135 @@ class MainActivity : AppCompatActivity() {
         startActivity(intent)
     }
 
+    fun handleImpeUri(uri: Uri) {
+        val text = readImpeFile(uri) ?: return
+        val track = parseImpe(text) ?: return
+        showImpeDialog(track)
+    }
+
+    fun handleImpeText(text: String) {
+        val track = parseImpe(text) ?: return
+        showImpeDialog(track)
+    }
+
+    private fun handleImpeIntent(intent: Intent?) {
+        val uri = intent?.data ?: return
+        handleImpeUri(uri)
+    }
+
+    fun showImpeDialog(track: Track) {
+        val activity = this
+        val label = if (track.artist.isEmpty()) track.title else "${track.artist} — ${track.title}"
+        AlertDialog.Builder(activity)
+            .setTitle(R.string.impe_title)
+            .setMessage(label)
+            .setPositiveButton(R.string.impe_download) { _, _ ->
+                lifecycleScope.launch {
+                    showLoading(true, "📥 ${track.artist} — ${track.title}")
+                    try {
+                        if (track.source == DownloadSource.YouTube && !ensureYtDlp()) return@launch
+                        val file = withContext(Dispatchers.IO) {
+                            DownloadHelper.download(activity, track, YtFormat.MP3) { _, _ -> }
+                        }
+                        Snackbar.make(binding.root, "Скачано: ${file.name}", Snackbar.LENGTH_LONG).show()
+                        libraryFragment?.refresh()
+                    } catch (e: Exception) {
+                        Snackbar.make(binding.root, e.message ?: "Ошибка", Snackbar.LENGTH_LONG).show()
+                    } finally {
+                        showLoading(false, "")
+                    }
+                }
+            }
+            .setNeutralButton(R.string.impe_stream) { _, _ ->
+                lifecycleScope.launch {
+                    showLoading(true, "🎧 ${track.artist} — ${track.title}")
+                    try {
+                        val url = withContext(Dispatchers.IO) {
+                            when (track.source) {
+                                DownloadSource.PesniMe -> PesniMeApi.resolveStreamUrl(track)
+                                DownloadSource.YouTube -> YtDlpHelper.getStreamUrl(
+                                    applicationContext, track, YtFormat.MP3)
+                                else -> track.streamUrl.ifEmpty { null }
+                            }
+                        }
+                        if (url == null) {
+                            Snackbar.make(binding.root, "Стрим недоступен", Snackbar.LENGTH_LONG).show()
+                            return@launch
+                        }
+                        PlaybackManager.playStream(activity, url,
+                            "${track.artist} — ${track.title}", track.id, false)
+                        binding.playerBar.root.isVisible = true
+                    } catch (e: Exception) {
+                        Snackbar.make(binding.root, e.message ?: "Ошибка", Snackbar.LENGTH_LONG).show()
+                    } finally {
+                        showLoading(false, "")
+                    }
+                }
+            }
+            .setNegativeButton(R.string.impe_playlist) { _, _ ->
+                val item = PlaylistItem(
+                    pathOrUrl = track.streamUrl,
+                    title = "${track.artist} — ${track.title}",
+                    subtitle = track.source.name,
+                    isVideo = false,
+                    isUrl = track.streamUrl.isNotEmpty(),
+                )
+                PlaybackManager.addToPlaylist(item)
+                Snackbar.make(binding.root, "➕ ${track.artist} — ${track.title}", Snackbar.LENGTH_SHORT).show()
+            }
+            .show()
+    }
+
+    private fun readImpeFile(uri: Uri): String? {
+        return try {
+            contentResolver.openInputStream(uri)?.bufferedReader()?.readText()
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseImpe(text: String): Track? {
+        val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        var source: String? = null
+        var id: String? = null
+        var artist: String? = ""
+        var title: String? = ""
+        var streamUrl: String? = ""
+        for (line in lines) {
+            val eq = line.indexOf('=')
+            if (eq < 0) continue
+            val key = line.substring(0, eq).trim()
+            val value = line.substring(eq + 1).trim()
+            when (key) {
+                "source" -> source = value
+                "id" -> id = value
+                "artist" -> artist = value
+                "title" -> title = value
+                "url" -> streamUrl = value
+            }
+        }
+        if (id == null) return null
+        val dlSource = when (source) {
+            "YouTube" -> DownloadSource.YouTube
+            "DriveMusic" -> DownloadSource.DriveMusic
+            "PesniMe" -> DownloadSource.PesniMe
+            else -> DownloadSource.MP3Party
+        }
+        return Track(
+            id = id!!,
+            artist = artist.orEmpty(),
+            title = title.orEmpty(),
+            streamUrl = streamUrl.orEmpty(),
+            source = dlSource,
+        )
+    }
+
     fun startStream(
         track: Track,
         format: YtFormat,
         adapter: TrackAdapter,
         position: Int,
     ) {
-        if (track.source != DownloadSource.YouTube) return
         if (downloading || streaming) {
             Snackbar.make(binding.root, "Дождитесь завершения операции", Snackbar.LENGTH_SHORT).show()
             return
@@ -319,16 +486,24 @@ class MainActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                if (!ensureYtDlp()) {
+                if (track.source == DownloadSource.YouTube && !ensureYtDlp()) {
                     return@launch
                 }
                 val url = withContext(Dispatchers.IO) {
-                    YtDlpHelper.getStreamUrl(applicationContext, track, format)
+                    when (track.source) {
+                        DownloadSource.PesniMe -> PesniMeApi.resolveStreamUrl(track)
+                        DownloadSource.YouTube -> YtDlpHelper.getStreamUrl(applicationContext, track, format)
+                        else -> null
+                    }
+                }
+                if (url == null) {
+                    Snackbar.make(binding.root, "Стрим недоступен для этого источника", Snackbar.LENGTH_LONG).show()
+                    return@launch
                 }
                 val title = listOf(track.artist, track.title)
                     .filter { it.isNotBlank() }
                     .joinToString(" — ")
-                val isVideo = format == YtFormat.MP4
+                val isVideo = track.source == DownloadSource.YouTube && format == YtFormat.MP4
                 PlaybackManager.playStream(this@MainActivity, url, title, track.id, isVideo)
                 binding.playerBar.root.isVisible = true
                 if (isVideo) {

@@ -10,6 +10,7 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
+import java.net.URLDecoder
 
 object DriveMusicApi {
     private const val BASE = "https://ru.drivemusic.me"
@@ -123,6 +124,19 @@ object DriveMusicApi {
                         lastErr = "файл слишком маленький ($written B), ссылка могла устареть"
                         return@use
                     }
+
+                    // Переименовать файл по Content-Disposition
+                    val cdHeader = resp.header("Content-Disposition") ?: ""
+                    val cdName = extractFileNameFromDisposition(cdHeader)
+                    if (cdName != null && cdName.endsWith(".mp3", ignoreCase = true)) {
+                        val cleaned = MusicLibrary.cleanDispositionFilename(cdName)
+                        val renamed = File(destFile.parentFile, cleaned)
+                        if (renamed.absolutePath != destFile.absolutePath) {
+                            destFile.renameTo(renamed)
+                            return renamed.absolutePath
+                        }
+                    }
+
                     return destFile.absolutePath
                 }
             } catch (e: Exception) {
@@ -178,6 +192,20 @@ object DriveMusicApi {
         if (u.startsWith("//")) u = "https:$u"
         if (u.startsWith("/")) u = "$BASE$u"
         return u
+    }
+
+    private fun extractFileNameFromDisposition(header: String): String? {
+        val utf8 = Regex("filename\\*=UTF-8''([^;\\s]+)", RegexOption.IGNORE_CASE)
+            .find(header)?.groupValues?.get(1)
+        if (utf8 != null) {
+            return try { URLDecoder.decode(utf8, "UTF-8") } catch (_: Exception) { null }
+        }
+        val plain = Regex("""filename="?([^";\s]+)"?""", RegexOption.IGNORE_CASE)
+            .find(header)?.groupValues?.get(1)
+        if (plain != null) {
+            return try { URLDecoder.decode(plain, "UTF-8") } catch (_: Exception) { null }
+        }
+        return null
     }
 
     private fun get(url: String, referer: String?): String? {

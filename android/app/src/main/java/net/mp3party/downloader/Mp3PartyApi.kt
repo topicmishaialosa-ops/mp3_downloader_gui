@@ -10,6 +10,7 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
+import java.net.URLDecoder
 
 object Mp3PartyApi {
     private const val USER_AGENT =
@@ -47,6 +48,44 @@ object Mp3PartyApi {
         """data-js-id="(\d+)".*?data-js-artist-name="([^"]*)".*?data-js-song-title="([^"]*)".*?data-js-url="([^"]+)"""",
         Pattern.DOTALL,
     )
+
+    fun fetchTrack(id: String): Track? {
+        val url = "https://mp3party.net/music/$id"
+        val body = get(url, null) ?: return null
+
+        var artist = ""
+        var title = ""
+
+        val panelM = panelPattern.matcher(body)
+        if (panelM.find()) {
+            val a = panelM.group(2)
+            val t = panelM.group(3)
+            if (a != null) artist = decode(a)
+            if (t != null) title = decode(t)
+        }
+
+        if (title.isEmpty()) {
+            val ogM = java.util.regex.Pattern.compile(
+                """property="og:title"\s+content="([^"]+)""""
+            ).matcher(body)
+            if (ogM.find()) {
+                val content = ogM.group(1) ?: ""
+                val parts = content.split(" - ", limit = 2)
+                if (parts.size == 2) {
+                    artist = parts[0].trim()
+                    title = parts[1].trim()
+                } else {
+                    title = content.trim()
+                }
+            }
+        }
+
+        if (title.isEmpty()) {
+            title = "Трек #$id"
+        }
+
+        return Track(id, artist, title, streamUrl(id))
+    }
 
     fun search(query: String): List<Track> {
         val encoded = URLEncoder.encode(query.trim(), Charsets.UTF_8.name())
@@ -134,6 +173,18 @@ object Mp3PartyApi {
                         return@use
                     }
 
+                    // Переименовать файл по Content-Disposition, если там нормальное имя
+                    val cdHeader = resp.header("Content-Disposition") ?: ""
+                    val cdName = extractFileNameFromDisposition(cdHeader)
+                    if (cdName != null && cdName.endsWith(".mp3", ignoreCase = true)) {
+                        val cleaned = MusicLibrary.cleanDispositionFilename(cdName)
+                        val renamed = File(destFile.parentFile, cleaned)
+                        if (renamed.absolutePath != destFile.absolutePath) {
+                            destFile.renameTo(renamed)
+                            return renamed.absolutePath
+                        }
+                    }
+
                     return destFile.absolutePath
                 }
             } catch (e: Exception) {
@@ -196,6 +247,26 @@ object Mp3PartyApi {
         if (u.startsWith("//")) u = "https:$u"
         if (u.startsWith("/")) u = "https://mp3party.net$u"
         return u
+    }
+
+    private fun extractFileNameFromDisposition(header: String): String? {
+        // filename*=UTF-8''...  (RFC 5987)
+        val utf8 = Regex("filename\\*=UTF-8''([^;\\s]+)", RegexOption.IGNORE_CASE)
+            .find(header)?.groupValues?.get(1)
+        if (utf8 != null) {
+            return try {
+                URLDecoder.decode(utf8, "UTF-8")
+            } catch (_: Exception) { null }
+        }
+        // filename="..." или filename=...
+        val plain = Regex("""filename="?([^";\s]+)"?""", RegexOption.IGNORE_CASE)
+            .find(header)?.groupValues?.get(1)
+        if (plain != null) {
+            return try {
+                URLDecoder.decode(plain, "UTF-8")
+            } catch (_: Exception) { null }
+        }
+        return null
     }
 
     private fun isMp3PartyErrorBody(bytes: ByteArray): Boolean {

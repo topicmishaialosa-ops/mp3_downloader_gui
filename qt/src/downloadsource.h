@@ -4,6 +4,8 @@ enum class DownloadSource {
     Mp3Party,
     DriveMusic,
     YtDlp,
+    PesniMe,
+    Local,
 };
 
 enum class YtFormat {
@@ -16,6 +18,8 @@ inline QString downloadSourceLabel(DownloadSource s) {
     case DownloadSource::Mp3Party: return QStringLiteral("MP3Party");
     case DownloadSource::DriveMusic: return QStringLiteral("DriveMusic");
     case DownloadSource::YtDlp: return QStringLiteral("YouTube (yt-dlp)");
+    case DownloadSource::PesniMe: return QStringLiteral("Pesni.me");
+    case DownloadSource::Local: return QStringLiteral("Local");
     }
     return QStringLiteral("?");
 }

@@ -13,6 +13,7 @@ import java.io.File
 class LibraryAdapter(
     private val onPlay: (LocalMediaFile) -> Unit,
     private val onToggle: (LocalMediaFile) -> Unit,
+    private val onAddToPlaylist: (LocalMediaFile) -> Unit = {},
 ) : RecyclerView.Adapter<LibraryAdapter.Holder>() {
 
     private val items = mutableListOf<LocalMediaFile>()
@@ -86,6 +87,9 @@ class LibraryAdapter(
                     animatePlayIcon(binding, toPause = true)
                     onPlay(item)
                 }
+            }
+            binding.addToQueueButton.setOnClickListener {
+                onAddToPlaylist(item)
             }
             binding.root.setOnClickListener {
                 if (isCurrent) {

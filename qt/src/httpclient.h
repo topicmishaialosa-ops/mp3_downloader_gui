@@ -13,6 +13,7 @@ public:
         int status = 0;
         QByteArray body;
         QString error;
+        QByteArray rawHeaders;
         bool ok() const { return status >= 200 && status < 300 && error.isEmpty(); }
     };
 
@@ -23,4 +24,7 @@ public:
                                    const QString &destPath,
                                    const QMap<QString, QString> &headers,
                                    std::function<bool(qint64, qint64)> progress = nullptr);
+
+    static QString extractFileNameFromDisposition(const QByteArray &rawHeaders);
+    static QString cleanDispositionFilename(const QString &name);
 };

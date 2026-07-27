@@ -46,6 +46,22 @@ object DownloadHelper {
                 onProgress(1f, "Готово")
                 File(path)
             }
+            DownloadSource.PesniMe -> {
+                onProgress(0.1f, "Pesni.me…")
+                val base = when {
+                    track.artist.isNotBlank() && track.title.isNotBlank() ->
+                        "${track.artist} - ${track.title}"
+                    track.title.isNotBlank() -> track.title
+                    else -> "track_${track.id}"
+                }
+                val safeName = base
+                    .replace(Regex("""[/\\:*?"<>|]"""), "_")
+                    .take(100)
+                val file = File(dir, "${safeName}_${track.id}.mp3")
+                val path = PesniMeApi.download(track, file)
+                onProgress(1f, "Готово")
+                File(path)
+            }
             DownloadSource.YouTube -> {
                 YtDlpHelper.download(context, track, dir, format, onProgress)
             }

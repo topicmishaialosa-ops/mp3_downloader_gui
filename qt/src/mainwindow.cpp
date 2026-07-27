@@ -8,7 +8,6 @@
 #include <QListWidgetItem>
 #include <QDesktopServices>
 #include <QFileDialog>
-#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
@@ -16,8 +15,18 @@
 #include <QPlainTextEdit>
 #include <QProgressBar>
 #include <QPushButton>
+#include <QCheckBox>
 #include <QSlider>
 #include <QTabWidget>
+#include <QRegularExpression>
+#include <QClipboard>
+#include <QDir>
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -26,8 +35,33 @@
 #include "drivemusicapi.h"
 #include "mp3partyapi.h"
 #include "paths.h"
+#include "pesnimeapi.h"
 #include "mpvhelper.h"
 #include "ytdlphelper.h"
+
+static QString sanitizeFilename(const QString &raw) {
+    // 1) URL-декодировать (%D0%A1 → К, + → пробел)
+    QString name = QUrl::fromPercentEncoding(raw.toUtf8()).replace(QLatin1Char('+'), QLatin1Char(' '));
+
+    // 2) Попробовать base64-декодировать
+    QByteArray b64Clean = name.toUtf8().replace('-', '+').replace('_', '/');
+    while (b64Clean.length() % 4 != 0) b64Clean.append('=');
+    if (name.length() >= 6) {
+        QByteArray decoded = QByteArray::fromBase64(b64Clean, QByteArray::Base64Encoding);
+        QString text = QString::fromUtf8(decoded);
+        QRegularExpression letterRe(QStringLiteral("\\p{L}"));
+        if (letterRe.match(text).hasMatch() && !text.contains(QLatin1Char('\0'))) {
+            name = text;
+        }
+    }
+
+    // 3) Очистить от мусора
+    name.replace(QLatin1Char('_'), QLatin1Char(' '));
+    name.remove(QRegularExpression(QStringLiteral("[^\\p{L}\\p{N}\\s\\-+]")));
+    name.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+    name = name.trimmed();
+    return name.isEmpty() ? QStringLiteral("track") : name;
+}
 
 MainWindow::MainWindow(QWidget *parent) : QMainWindow(parent) {
     setupUi();
@@ -52,6 +86,7 @@ void MainWindow::setupUi() {
     m_sourceCombo = new QComboBox();
     m_sourceCombo->addItem(QStringLiteral("MP3Party"), static_cast<int>(DownloadSource::Mp3Party));
     m_sourceCombo->addItem(QStringLiteral("DriveMusic"), static_cast<int>(DownloadSource::DriveMusic));
+    m_sourceCombo->addItem(QStringLiteral("Pesni.me"), static_cast<int>(DownloadSource::PesniMe));
     m_sourceCombo->addItem(QStringLiteral("YouTube"), static_cast<int>(DownloadSource::YtDlp));
     m_ytFormatCombo = new QComboBox();
     m_ytFormatCombo->addItem(QStringLiteral("MP3"), static_cast<int>(YtFormat::Mp3));
@@ -88,14 +123,36 @@ void MainWindow::setupUi() {
     auto *streamBtn = new QPushButton(QStringLiteral("▶ Слушать"));
     auto *dlAll = new QPushButton(QStringLiteral("📥 Все"));
     auto *addPlaylistBtn = new QPushButton(QStringLiteral("➕ В плейлист"));
+    auto *copyLinkBtn = new QPushButton(QStringLiteral("📋 Копировать ссылку"));
+    auto *saveImpeBtn = new QPushButton(QStringLiteral("💾 .impe"));
+    auto *importLinksBtn = new QPushButton(QStringLiteral("🔗 Импорт ссылок"));
+    auto *importBtn = new QPushButton(QStringLiteral("📂 Импорт"));
     connect(dlSel, &QPushButton::clicked, this, &MainWindow::onDownloadSelected);
     connect(streamBtn, &QPushButton::clicked, this, &MainWindow::onStreamSelected);
     connect(dlAll, &QPushButton::clicked, this, &MainWindow::onDownloadAll);
     connect(addPlaylistBtn, &QPushButton::clicked, this, &MainWindow::onAddToPlaylist);
+    connect(copyLinkBtn, &QPushButton::clicked, this, &MainWindow::onCopyLink);
+    connect(saveImpeBtn, &QPushButton::clicked, this, &MainWindow::onSaveImpe);
+    connect(importLinksBtn, &QPushButton::clicked, this, &MainWindow::onImportLinks);
+    connect(importBtn, &QPushButton::clicked, this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Выберите .impe файл"),
+            QString(), QStringLiteral("IMPE (*.impe);;Все файлы (*)"));
+        if (path.isEmpty()) return;
+        Track t = parseImpeFile(path);
+        if (t.id.isEmpty()) {
+            QMessageBox::warning(this, QStringLiteral("Ошибка"), QStringLiteral("Не удалось разобрать .impe файл"));
+            return;
+        }
+        showImpeDialog(t);
+    });
     btnRow->addWidget(dlSel);
     btnRow->addWidget(streamBtn);
     btnRow->addWidget(dlAll);
     btnRow->addWidget(addPlaylistBtn);
+    btnRow->addWidget(copyLinkBtn);
+    btnRow->addWidget(saveImpeBtn);
+    btnRow->addWidget(importLinksBtn);
+    btnRow->addWidget(importBtn);
     btnRow->addStretch();
 
     searchLay->addLayout(top);
@@ -108,10 +165,19 @@ void MainWindow::setupUi() {
     auto *libTop = new QHBoxLayout();
     auto *refreshBtn = new QPushButton(QStringLiteral("🔄 Обновить"));
     auto *openBtn = new QPushButton(QStringLiteral("📂 Открыть папку"));
+    auto *libCopyBtn = new QPushButton(QStringLiteral("📋 Копировать путь"));
     connect(refreshBtn, &QPushButton::clicked, this, &MainWindow::onRefreshLibrary);
     connect(openBtn, &QPushButton::clicked, this, &MainWindow::onOpenFolder);
+    connect(libCopyBtn, &QPushButton::clicked, this, [this]() {
+        const int row = m_libraryList->currentRow();
+        if (row < 0 || row >= m_library.size()) return;
+        const auto &f = m_library[row];
+        QApplication::clipboard()->setText(f.path);
+        onLog(QStringLiteral("📋 Путь скопирован: %1").arg(f.path));
+    });
     libTop->addWidget(refreshBtn);
     libTop->addWidget(openBtn);
+    libTop->addWidget(libCopyBtn);
     libTop->addStretch();
     m_libraryList = new QListWidget();
     connect(m_libraryList, &QListWidget::itemDoubleClicked, this, [this](QListWidgetItem *item) {
@@ -347,6 +413,9 @@ void MainWindow::onSearch() {
         case DownloadSource::DriveMusic:
             tracks = DriveMusicApi::search(query, &err);
             break;
+        case DownloadSource::PesniMe:
+            tracks = PesniMeApi::search(query, &err);
+            break;
         case DownloadSource::YtDlp:
             tracks = YtDlpHelper::search(query, &err);
             break;
@@ -385,6 +454,10 @@ void MainWindow::onBatchSearch() {
     lay->addWidget(edit);
     auto *counter = new QLabel(QStringLiteral("Будет отправлено запросов: 0"));
     lay->addWidget(counter);
+    auto *autodlCb = new QCheckBox(QStringLiteral("⬇ Автоскачивать первый трек"));
+    autodlCb->setToolTip(QStringLiteral(
+        "Автоматически скачивать первый найденный трек по каждому запросу из списка"));
+    lay->addWidget(autodlCb);
     auto updateCounter = [edit, counter]() {
         const int n = BatchQueries::parse(edit->toPlainText()).size();
         counter->setText(QStringLiteral("Будет отправлено запросов: %1").arg(n));
@@ -400,6 +473,7 @@ void MainWindow::onBatchSearch() {
     lay->addLayout(btnRow);
     QObject::connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
     QObject::connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+    const bool autodownload = autodlCb->isChecked();
     if (dlg.exec() != QDialog::Accepted) {
         return;
     }
@@ -418,10 +492,10 @@ void MainWindow::onBatchSearch() {
     m_resultsList->clear();
     m_tracks.clear();
     onLog(QStringLiteral("⏳ Пакетный поиск: %1 запрос(ов)…").arg(queries.size()));
-    runBatchQuery(queries, 0);
+    runBatchQuery(queries, 0, autodownload);
 }
 
-void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
+void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index, bool autodownload) {
     if (index >= queries.size()) {
         m_searchBtn->setEnabled(true);
         m_progress->setVisible(false);
@@ -431,18 +505,42 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
     const BatchQuery q = queries.at(index);
     const int total = queries.size();
     const auto src = currentSource();
+    const auto fmt = currentYtFormat();
     onLog(QStringLiteral("[%1/%2] 🔎 %3").arg(index + 1).arg(total).arg(q.searchText()));
 
     if (q.isUrl()) {
-        onLog(QStringLiteral("  ⚠️ %1 — URL в пакетном режиме пока не поддерживается").arg(q.url));
-        QTimer::singleShot(0, this, [this, queries, index]() {
-            runBatchQuery(queries, index + 1);
+        const QString url = q.url.toLower();
+        const bool isDirect = url.endsWith(".mp3") || url.endsWith(".mp4") ||
+            url.endsWith(".m4a") || url.endsWith(".ogg") ||
+            url.endsWith(".flac") || url.endsWith(".wav") ||
+            url.contains("/download/") || url.contains("/dl/online/") ||
+            url.contains("pl.pesni.me");
+        if (isDirect) {
+            const QString raw = q.url.section('/', -1).section('.', 0, 0);
+            const QString filename = sanitizeFilename(raw);
+            Track t;
+            t.id.clear();
+            t.artist.clear();
+            t.title = filename;
+            t.streamUrl = q.url;
+            t.source = currentSource();
+            m_tracks.append(t);
+            m_resultsList->addItem(QStringLiteral("%1 — %2").arg(t.artist, t.title));
+            onLog(QStringLiteral("  📋 Прямая ссылка: %1").arg(q.url));
+            QTimer::singleShot(0, this, [this, queries, index, autodownload]() {
+                runBatchQuery(queries, index + 1, autodownload);
+            });
+            return;
+        }
+        onLog(QStringLiteral("  ⚠️ %1 — URL не распознан").arg(q.url));
+        QTimer::singleShot(0, this, [this, queries, index, autodownload]() {
+            runBatchQuery(queries, index + 1, autodownload);
         });
         return;
     }
 
     const QString query = q.searchText();
-    (void)QtConcurrent::run([this, queries, index, total, src, query]() {
+    (void)QtConcurrent::run([this, queries, index, total, src, fmt, query, autodownload]() {
         QString err;
         QVector<Track> tracks;
         switch (src) {
@@ -452,12 +550,20 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
         case DownloadSource::DriveMusic:
             tracks = DriveMusicApi::search(query, &err);
             break;
+        case DownloadSource::PesniMe:
+            tracks = PesniMeApi::search(query, &err);
+            break;
         case DownloadSource::YtDlp:
             tracks = YtDlpHelper::search(query, &err);
             break;
         }
-        QTimer::singleShot(0, this, [this, tracks, err, queries, index]() {
+        QTimer::singleShot(0, this, [this, tracks, err, queries, index, src, fmt, autodownload]() {
             if (!tracks.isEmpty()) {
+                if (autodownload) {
+                    m_downloads.setDownloadFolder(m_folderEdit->text());
+                    m_downloads.enqueue(tracks[0], src, fmt);
+                    onLog(QStringLiteral("  ⬇ авто: %1 — %2").arg(tracks[0].artist, tracks[0].title));
+                }
                 for (const auto &t : tracks) {
                     m_tracks.append(t);
                     m_resultsList->addItem(
@@ -467,7 +573,7 @@ void MainWindow::runBatchQuery(QVector<BatchQuery> queries, int index) {
             } else {
                 onLog(QStringLiteral("  ✗ %1").arg(err));
             }
-            runBatchQuery(queries, index + 1);
+            runBatchQuery(queries, index + 1, autodownload);
         });
     });
 }
@@ -575,6 +681,182 @@ void MainWindow::onAddToPlaylist() {
     }
 }
 
+Track MainWindow::parseImpeFile(const QString &path) {
+    Track t;
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) return t;
+    QTextStream in(&f);
+    while (!in.atEnd()) {
+        const QString line = in.readLine().trimmed();
+        const int eq = line.indexOf(QLatin1Char('='));
+        if (eq < 0) continue;
+        const QString key = line.left(eq).trimmed();
+        const QString val = line.mid(eq + 1).trimmed();
+        if (key == QLatin1String("source")) {
+            if (val == QLatin1String("MP3Party")) t.source = DownloadSource::Mp3Party;
+            else if (val == QLatin1String("DriveMusic")) t.source = DownloadSource::DriveMusic;
+            else if (val == QLatin1String("PesniMe")) t.source = DownloadSource::PesniMe;
+            else if (val == QLatin1String("YouTube")) t.source = DownloadSource::YtDlp;
+            else if (val == QLatin1String("Local")) t.source = DownloadSource::Local;
+        } else if (key == QLatin1String("id")) t.id = val;
+        else if (key == QLatin1String("artist")) t.artist = val;
+        else if (key == QLatin1String("title")) t.title = val;
+        else if (key == QLatin1String("url")) t.url = val;
+    }
+    return t;
+}
+
+void MainWindow::showImpeDialog(const Track &track) {
+    const QString srcName = [&]() {
+        switch (track.source) {
+        case DownloadSource::Mp3Party: return QStringLiteral("MP3Party");
+        case DownloadSource::DriveMusic: return QStringLiteral("DriveMusic");
+        case DownloadSource::PesniMe: return QStringLiteral("Pesni.me");
+        case DownloadSource::YtDlp: return QStringLiteral("YouTube (yt-dlp)");
+        case DownloadSource::Local: return QStringLiteral("Local");
+        }
+        return QStringLiteral("?");
+    }();
+
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("📂 .impe — %1 — %2").arg(track.artist, track.title));
+    dlg.resize(400, 160);
+    auto *lay = new QVBoxLayout(&dlg);
+    auto *label = new QLabel(QStringLiteral("<b>%1 — %2</b><br>Источник: %3")
+        .arg(track.artist.toHtmlEscaped(), track.title.toHtmlEscaped(), srcName));
+    label->setWordWrap(true);
+    lay->addWidget(label);
+    auto *btnRow = new QHBoxLayout();
+    auto *dlBtn = new QPushButton(QStringLiteral("📥 Скачать"));
+    auto *streamBtn = new QPushButton(QStringLiteral("🎧 Слушать"));
+    auto *plBtn = new QPushButton(QStringLiteral("➕ В плейлист"));
+    auto *cancelBtn = new QPushButton(QStringLiteral("✕ Закрыть"));
+    btnRow->addWidget(dlBtn);
+    btnRow->addWidget(streamBtn);
+    btnRow->addWidget(plBtn);
+    btnRow->addStretch();
+    btnRow->addWidget(cancelBtn);
+    lay->addLayout(btnRow);
+
+    connect(dlBtn, &QPushButton::clicked, &dlg, [this, track, &dlg]() {
+        enqueueTracksFromTrack(track);
+        dlg.accept();
+    });
+    connect(streamBtn, &QPushButton::clicked, &dlg, [this, track, &dlg]() {
+        startStreamFromTrack(track);
+        dlg.accept();
+    });
+    connect(plBtn, &QPushButton::clicked, &dlg, [this, track, &dlg]() {
+        addToPlaylistFromTrack(track);
+        dlg.accept();
+    });
+    connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+    dlg.exec();
+}
+
+void MainWindow::onCopyLink() {
+    const auto items = m_resultsList->selectedItems();
+    const Track *track = nullptr;
+    if (items.isEmpty() && m_resultsList->currentRow() >= 0) {
+        const int row = m_resultsList->currentRow();
+        if (row >= 0 && row < m_tracks.size()) track = &m_tracks[row];
+    } else if (!items.isEmpty()) {
+        const int row = m_resultsList->row(items.first());
+        if (row >= 0 && row < m_tracks.size()) track = &m_tracks[row];
+    }
+    if (!track) return;
+
+    const auto src = currentSource();
+    QString url;
+    switch (src) {
+    case DownloadSource::Mp3Party:
+        url = track->streamUrl.startsWith("http") ? track->streamUrl
+            : QStringLiteral("https://dl2.mp3party.net/online/%1.mp3").arg(track->id);
+        break;
+    case DownloadSource::DriveMusic:
+    case DownloadSource::PesniMe:
+    case DownloadSource::YtDlp:
+        url = track->streamUrl;
+        break;
+    }
+
+    if (url.startsWith("http")) {
+        QApplication::clipboard()->setText(url);
+        onLog(QStringLiteral("📋 Скопировано: %1").arg(url));
+    } else {
+        onLog(QStringLiteral("❌ Ссылка недоступна"));
+    }
+}
+
+static QString downloadSourceToImpeName(DownloadSource s) {
+    switch (s) {
+    case DownloadSource::Mp3Party: return QStringLiteral("MP3Party");
+    case DownloadSource::DriveMusic: return QStringLiteral("DriveMusic");
+    case DownloadSource::PesniMe: return QStringLiteral("PesniMe");
+    case DownloadSource::YtDlp: return QStringLiteral("YouTube");
+    }
+    return {};
+}
+
+void MainWindow::onSaveImpe() {
+    const auto items = m_resultsList->selectedItems();
+    QVector<Track> toSave;
+    if (!items.isEmpty()) {
+        for (const auto *item : items) {
+            const int row = m_resultsList->row(item);
+            if (row >= 0 && row < m_tracks.size()) {
+                toSave.append(m_tracks[row]);
+            }
+        }
+    } else {
+        toSave = m_tracks;
+    }
+    if (toSave.isEmpty()) {
+        onLog(QStringLiteral("❌ Нет треков для сохранения"));
+        return;
+    }
+    const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("Папка для .impe файлов"),
+        m_folderEdit->text());
+    if (dir.isEmpty()) return;
+
+    const auto src = currentSource();
+    const QString impeName = downloadSourceToImpeName(src);
+    int saved = 0;
+    for (const auto &t : toSave) {
+        const QString impe = QStringLiteral("source=%1\nid=%2\nartist=%3\ntitle=%4\nurl=%5\n")
+            .arg(impeName, t.id, t.artist, t.title, t.url);
+        const QString name = QStringLiteral("%1_%2.impe")
+            .arg(t.artist.isEmpty() ? t.id : t.artist, t.title);
+        QFile f(QDir(dir).absoluteFilePath(name));
+        if (f.open(QIODevice::WriteOnly | QIODevice::Text)) {
+            f.write(impe.toUtf8());
+            f.close();
+            saved++;
+        }
+    }
+    onLog(QStringLiteral("💾 Сохранено .impe: %1 в %2").arg(saved).arg(dir));
+}
+
+void MainWindow::enqueueTracksFromTrack(const Track &track) {
+    m_downloads.setDownloadFolder(m_folderEdit->text());
+    m_downloads.enqueue(track, currentSource(), currentYtFormat());
+}
+
+void MainWindow::startStreamFromTrack(const Track &track) {
+    startStream(track);
+}
+
+void MainWindow::addToPlaylistFromTrack(const Track &track) {
+    PlaylistItem pi;
+    pi.pathOrUrl = track.streamUrl;
+    pi.title = track.artist + QStringLiteral(" — ") + track.title;
+    pi.subtitle = QStringLiteral("Стрим ") + m_sourceCombo->currentText();
+    pi.isVideo = false;
+    pi.isUrl = true;
+    m_player.addToPlaylist(pi);
+    onLog(QStringLiteral("➕ %1 — %2 добавлен в плейлист").arg(track.artist, track.title));
+}
+
 void MainWindow::startStream(const Track &track) {
     if (currentSource() == DownloadSource::YtDlp && !ensureYtDlp()) {
         return;
@@ -601,6 +883,10 @@ void MainWindow::startStream(const Track &track) {
             url = DriveMusicApi::streamUrl(track, &err);
             sub = QStringLiteral("DriveMusic");
             break;
+        case DownloadSource::PesniMe:
+            url = PesniMeApi::streamUrl(track, &err);
+            sub = QStringLiteral("Pesni.me");
+            break;
         case DownloadSource::YtDlp:
             url = YtDlpHelper::streamUrl(track, fmt, &err);
             sub = QStringLiteral("YouTube");
@@ -616,6 +902,88 @@ void MainWindow::startStream(const Track &track) {
             m_player.playUrl(url, title, sub, isVideo);
         });
     });
+}
+
+void MainWindow::onImportLinks() {
+    QDialog dlg(this);
+    dlg.setWindowTitle(QStringLiteral("🔗 Импорт прямых ссылок"));
+    dlg.resize(560, 320);
+    auto *lay = new QVBoxLayout(&dlg);
+    lay->addWidget(new QLabel(QStringLiteral(
+        "Вставьте прямые ссылки на аудиофайлы (по одной на строку).\n"
+        "Поддерживаются: .mp3, .mp4, .m4a, .ogg, .flac, .wav,\n"
+        "а также ссылки /download/, /dl/online/, pl.pesni.me")));
+    auto *edit = new QPlainTextEdit(&dlg);
+    edit->setPlaceholderText(QStringLiteral(
+        "https://dl2.mp3party.net/download/12345\n"
+        "https://cdn.example.com/song.mp3\n"
+        "https://s123.pl.pesni.me/track/abc.mp3"));
+    edit->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    lay->addWidget(edit);
+    auto *btnRow = new QHBoxLayout();
+    btnRow->addStretch();
+    auto *cancelBtn = new QPushButton(QStringLiteral("Отмена"));
+    auto *okBtn = new QPushButton(QStringLiteral("📥 Импортировать"));
+    okBtn->setDefault(true);
+    btnRow->addWidget(cancelBtn);
+    btnRow->addWidget(okBtn);
+    lay->addLayout(btnRow);
+    QObject::connect(cancelBtn, &QPushButton::clicked, &dlg, &QDialog::reject);
+    QObject::connect(okBtn, &QPushButton::clicked, &dlg, &QDialog::accept);
+    if (dlg.exec() != QDialog::Accepted) return;
+
+    const QStringList lines = edit->toPlainText().split('\n', Qt::SkipEmptyParts);
+    const QStringList patterns = {".mp3", ".mp4", ".m4a", ".ogg", ".flac", ".wav",
+        "/download/", "/dl/online/", "pl.pesni.me"};
+    int imported = 0;
+    for (QString line : lines) {
+        line = line.trimmed();
+        if (line.isEmpty()) continue;
+        const QString lower = line.toLower();
+        bool isDirect = false;
+        for (const auto &p : patterns) {
+            if (lower.contains(p)) { isDirect = true; break; }
+        }
+        if (isDirect && (lower.startsWith("http://") || lower.startsWith("https://"))) {
+            Track t;
+            if (lower.contains("mp3party.net/download/")) {
+                const QString id = line.section('/', -1).section('.', 0, 0);
+                if (!id.isEmpty()) {
+                    t = Mp3PartyApi::fetchTrack(id);
+                    t.streamUrl = line;
+                } else {
+                    t.title = sanitizeFilename(line.section('/', -1).section('.', 0, 0));
+                    t.streamUrl = line;
+                    t.source = currentSource();
+                }
+            } else if (lower.contains("pl.pesni.me") || lower.contains("dw.pesni.me")) {
+                const QString id = line.section('/', -1).section('.', 0, 0);
+                if (!id.isEmpty()) {
+                    t = PesniMeApi::fetchTrack(id);
+                    t.streamUrl = line;
+                } else {
+                    t.title = sanitizeFilename(line.section('/', -1).section('.', 0, 0));
+                    t.streamUrl = line;
+                    t.source = currentSource();
+                }
+            } else {
+                t.title = sanitizeFilename(line.section('/', -1).section('.', 0, 0));
+                t.streamUrl = line;
+                t.source = currentSource();
+            }
+            m_tracks.append(t);
+            const QString label = t.artist.isEmpty()
+                ? t.title
+                : QStringLiteral("%1 — %2").arg(t.artist, t.title);
+            m_resultsList->addItem(label);
+            imported++;
+        }
+    }
+    if (imported > 0) {
+        onLog(QStringLiteral("✅ Импортировано %1 ссылок").arg(imported));
+    } else {
+        QMessageBox::warning(this, QStringLiteral("Импорт"), QStringLiteral("Не удалось распознать ссылки"));
+    }
 }
 
 void MainWindow::onRefreshLibrary() {

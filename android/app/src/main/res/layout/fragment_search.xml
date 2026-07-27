@@ -55,6 +55,13 @@
                     android:text="DriveMusic" />
 
                 <com.google.android.material.chip.Chip
+                    android:id="@+id/chipPesnime"
+                    style="@style/Widget.Material3.Chip.Filter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Pesni.me" />
+
+                <com.google.android.material.chip.Chip
                     android:id="@+id/chipYoutube"
                     style="@style/Widget.Material3.Chip.Filter"
                     android:layout_width="wrap_content"
@@ -124,6 +131,24 @@
                 android:layout_marginTop="6dp"
                 android:text="@string/batch_search"
                 app:icon="@drawable/ic_search" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/impeButton"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="📂 Импорт .impe"
+                app:icon="@drawable/ic_folder" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/importLinksButton"
+                style="@style/Widget.Material3.Button.TonalButton"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="🔗 Импорт ссылок"
+                app:icon="@drawable/ic_link" />
         </LinearLayout>
     </com.google.android.material.appbar.AppBarLayout>
 
@@ -180,6 +205,15 @@
                     app:icon="@drawable/ic_download"
                     app:iconTint="@color/accent_green"
                     android:textColor="@color/accent_green"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/saveAllImpeButton"
+                    style="@style/Widget.Material3.Button.TextButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="💾 .impe"
                     android:visibility="gone"
                     tools:visibility="visible" />
             </LinearLayout>

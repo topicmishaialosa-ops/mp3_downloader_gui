@@ -1,5 +1,10 @@
 use std::time::Duration;
 
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::thread;
+
 use eframe::egui::{self, Color32, Frame, Margin, Rounding, Stroke, Vec2};
 
 use crate::batch;
@@ -59,6 +64,20 @@ impl eframe::App for LinkParserApp {
                 ctx.request_repaint();
             } else {
                 self.stream_rx = Some(rx);
+            }
+        }
+
+        if let Some(rx) = self.copy_rx.take() {
+            if let Ok(url) = rx.try_recv() {
+                if !url.is_empty() {
+                    ctx.output_mut(|o| o.copied_text = url.clone());
+                    self.status = format!("📋 Скопировано: {}", url);
+                } else {
+                    self.status = "❌ Не удалось получить ссылку".into();
+                }
+                ctx.request_repaint();
+            } else {
+                self.copy_rx = Some(rx);
             }
         }
 
@@ -215,6 +234,24 @@ impl eframe::App for LinkParserApp {
                 )
                 .show(ctx, |ui| {
                     self.show_playlist_panel(ui, theme);
+                });
+        }
+
+        if let Some((ref track, _src)) = self.impe_to_handle.clone() {
+            let title_text = format!("📂 .impe — {} — {}", track.artist, track.title);
+            egui::Window::new(&title_text)
+                .id("impe_window".into())
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .resizable(false)
+                .collapsible(false)
+                .frame(
+                    Frame::window(&ctx.style())
+                        .fill(theme.card_bg)
+                        .stroke(Stroke::new(1.0, theme.card_border))
+                        .rounding(Rounding::same(10.0)),
+                )
+                .show(ctx, |ui| {
+                    self.show_impe_panel(ui, theme);
                 });
         }
 
@@ -497,11 +534,27 @@ impl LinkParserApp {
                                 self.player.add_to_playlist(item);
                                 self.status = format!("➕ {} добавлен в плейлист", f.display_name);
                             }
+                            if ui.add(theme.neutral_button("📋")).on_hover_text("Копировать путь").clicked() {
+                                let path = f.path.to_string_lossy().to_string();
+                                ui.output_mut(|o| o.copied_text = path.clone());
+                                self.status = format!("📋 Путь скопирован: {}", path);
+                            }
                         });
                         ui.separator();
                     }
                 });
-        });
+                });
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("📋 Копировать ссылку:").size(12.0).color(theme.text_muted));
+                    egui::ComboBox::from_id_salt("copy_source")
+                        .selected_text(self.copy_source.label())
+                        .show_ui(ui, |ui| {
+                            for src in [DownloadSource::Mp3Party, DownloadSource::DriveMusic, DownloadSource::YtDlp, DownloadSource::PesniMe] {
+                                ui.selectable_value(&mut self.copy_source, src, src.label());
+                            }
+                        });
+                });
     }
 
     pub fn show_download_progress(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
@@ -666,19 +719,23 @@ impl LinkParserApp {
         );
         ui.add_space(6.0);
         ui.horizontal(|ui| {
-            if ui
-                .add_enabled(!self.loading, theme.success_button("▶ Найти по списку"))
-                .clicked()
-            {
-                self.start_batch_search();
-                self.show_batch_window = false;
-            }
-            if ui.add(theme.neutral_button("Очистить")).clicked() {
-                self.batch_input.clear();
-            }
-            if ui.add(theme.neutral_button("Закрыть")).clicked() {
-                self.show_batch_window = false;
-            }
+            ui.checkbox(&mut self.batch_autodownload, "⬇ Автоскачивать первый трек")
+                .on_hover_text("Автоматически скачивать первый найденный трек по каждому запросу из списка");
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.add(theme.neutral_button("Закрыть")).clicked() {
+                    self.show_batch_window = false;
+                }
+                if ui.add(theme.neutral_button("Очистить")).clicked() {
+                    self.batch_input.clear();
+                }
+                if ui
+                    .add_enabled(!self.loading, theme.success_button("▶ Найти по списку"))
+                    .clicked()
+                {
+                    self.start_batch_search();
+                    self.show_batch_window = false;
+                }
+            });
         });
     }
 
@@ -708,6 +765,11 @@ impl LinkParserApp {
                             &mut self.download_source,
                             DownloadSource::YtDlp,
                             DownloadSource::YtDlp.label(),
+                        );
+                        ui.selectable_value(
+                            &mut self.download_source,
+                            DownloadSource::PesniMe,
+                            DownloadSource::PesniMe.label(),
                         );
                     });
             });
@@ -741,6 +803,9 @@ impl LinkParserApp {
                 DownloadSource::Mp3Party => "Поиск на mp3party.net, скачивание online/download URL",
                 DownloadSource::DriveMusic => {
                     "Поиск на drivemusic.me; ссылки на MP3 временные — скачивание со страницы трека"
+                }
+                DownloadSource::PesniMe => {
+                    "Поиск на pesni.me, скачивание MP3 со страницы трека"
                 }
                 DownloadSource::YtDlp => match self.ytdlp_format {
                     YtDlpFormat::Mp3 => {
@@ -785,6 +850,7 @@ impl LinkParserApp {
                     let search_title = match self.download_source {
                         DownloadSource::Mp3Party => "🔎 Поиск (MP3Party)",
                         DownloadSource::DriveMusic => "🔎 Поиск (DriveMusic)",
+                        DownloadSource::PesniMe => "🔎 Поиск (Pesni.me)",
                         DownloadSource::YtDlp => "🔎 Поиск (YouTube)",
                     };
                     ui.label(theme.section_title(search_title));
@@ -792,6 +858,7 @@ impl LinkParserApp {
                     let search_hint = match self.download_source {
                         DownloadSource::Mp3Party => "Исполнитель или название на mp3party",
                         DownloadSource::DriveMusic => "Исполнитель или название на drivemusic",
+                        DownloadSource::PesniMe => "Исполнитель или название на pesni.me",
                         DownloadSource::YtDlp => "Запрос для поиска на YouTube",
                     };
                     ui.label(
@@ -805,6 +872,7 @@ impl LinkParserApp {
                         let placeholder = match self.download_source {
                             DownloadSource::Mp3Party => "Queen, Кино…",
                             DownloadSource::DriveMusic => "Исполнитель или название…",
+                            DownloadSource::PesniMe => "Queen, Кино…",
                             DownloadSource::YtDlp => "Queen Killer Queen…",
                         };
                         let search_resp = ui.add_sized(
@@ -842,6 +910,24 @@ impl LinkParserApp {
                     {
                         self.show_batch_window = true;
                     }
+
+                    if ui.add(theme.neutral_button("📂 .impe")).on_hover_text("Импортировать .impe файл").clicked() {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Выберите .impe файл")
+                            .add_filter("IMPE", &["impe"])
+                            .pick_file()
+                        {
+                            if let Ok(text) = std::fs::read_to_string(&path) {
+                                if let Some(parsed) = parse_impe(&text) {
+                                    self.impe_to_handle = Some(parsed);
+                                } else {
+                                    self.status = "❌ Не удалось разобрать .impe файл".into();
+                                }
+                            } else {
+                                self.status = "❌ Не удалось прочитать файл".into();
+                            }
+                        }
+                    }
                 });
             });
         });
@@ -877,6 +963,29 @@ impl LinkParserApp {
                     }
                     ui.output_mut(|o| o.copied_text = text);
                     self.status = "📋 Скопировано в буфер".into();
+                }
+
+                if !self.tracks.is_empty()
+                    && ui.add(theme.neutral_button("💾 Сохранить .impe")).clicked()
+                {
+                    let src = self.download_source;
+                    let mut saved = 0;
+                    for t in &self.tracks {
+                        let impe = format!(
+                            "source={}\nid={}\nartist={}\ntitle={}\nurl={}\n",
+                            src.impe_name(), t.id, t.artist, t.title, t.url,
+                        );
+                        let fname = format!(
+                            "{}_{}.impe",
+                            t.artist.replace(' ', "_"),
+                            t.title.replace(' ', "_")
+                        );
+                        let out = self.downloads_folder.join(&fname);
+                        if std::fs::write(&out, &impe).is_ok() {
+                            saved += 1;
+                        }
+                    }
+                    self.status = format!("💾 Сохранено .impe: {}", saved);
                 }
 
                 if ui.add(theme.neutral_button("📂 Выбрать папку")).clicked() {
@@ -1097,6 +1206,76 @@ impl LinkParserApp {
                                             };
                                             self.player.add_to_playlist(item);
                                             self.status = format!("➕ {} добавлен в плейлист", track.title);
+                                        }
+                                        if ui
+                                            .add(
+                                                theme
+                                                    .neutral_button("📋")
+                                                    .min_size(Vec2::new(36.0, 24.0)),
+                                            )
+                                            .on_hover_text("Копировать прямую ссылку")
+                                            .clicked()
+                                        {
+                                            let track = self.tracks[*i].clone();
+                                            let source = self.copy_source;
+                                            match source {
+                                                DownloadSource::Mp3Party => {
+                                                    let url = if track.url.starts_with("http") {
+                                                        track.url.clone()
+                                                    } else {
+                                                        format!("https://dl2.mp3party.net/online/{}.mp3", track.id)
+                                                    };
+                                                    ui.output_mut(|o| o.copied_text = url.clone());
+                                                    self.status = format!("📋 Скопировано: {}", url);
+                                                }
+                                                _ => {
+                                                    self.status = "⏳ Получение ссылки…".into();
+                                                    let (tx, rx) = mpsc::channel();
+                                                    self.copy_rx = Some(rx);
+                                                    thread::spawn(move || {
+                                                        let url = match source {
+                                                            DownloadSource::DriveMusic => {
+                                                                LinkParserApp::drivemusic_stream_url(&track)
+                                                            }
+                                                            DownloadSource::PesniMe => {
+                                                                LinkParserApp::pesnime_stream_url(&track)
+                                                            }
+                                                            DownloadSource::YtDlp => {
+                                                                LinkParserApp::ytdlp_stream_url(&track, YtDlpFormat::Mp3)
+                                                            }
+                                                            _ => unreachable!(),
+                                                        };
+                                                        let _ = tx.send(url.unwrap_or_default());
+                                                    });
+                                                }
+                                            }
+                                        }
+                                        if ui
+                                            .add(
+                                                theme
+                                                    .neutral_button("💾")
+                                                    .min_size(Vec2::new(36.0, 24.0)),
+                                            )
+                                            .on_hover_text("Сохранить как .impe")
+                                            .clicked()
+                                        {
+                                            let track = &self.tracks[*i];
+                                            let src = self.download_source;
+                                            let impe = format!(
+                                                "source={}\nid={}\nartist={}\ntitle={}\nurl={}\n",
+                                                src.impe_name(), track.id, track.artist, track.title, track.url,
+                                            );
+                                            let fname = format!(
+                                                "{}_{}.impe",
+                                                track.artist.replace(' ', "_"),
+                                                track.title.replace(' ', "_")
+                                            );
+                                            let out = self.downloads_folder.join(&fname);
+                                            if std::fs::write(&out, &impe).is_ok() {
+                                                self.status = format!("💾 Сохранено: {}", out.display());
+                                            } else {
+                                                self.status = "❌ Ошибка сохранения".into();
+                                            }
                                         }
                                     });
 
@@ -1378,6 +1557,16 @@ impl LinkParserApp {
                                             }
                                         }
                                     }
+                                    if task.source == DownloadSource::PesniMe {
+                                        let page = Self::pesnime_track_url(&track.id);
+                                        if ui
+                                            .add(theme.neutral_button("🌐 Браузер"))
+                                            .on_hover_text("Открыть страницу трека")
+                                            .clicked()
+                                        {
+                                            Self::open_external_url(&page);
+                                        }
+                                    }
                                     if ui.small_button("✕").clicked() {
                                         to_remove.push(i);
                                     }
@@ -1402,6 +1591,108 @@ impl LinkParserApp {
         for idx in to_remove {
             self.download_tasks.remove(idx);
         }
+    }
+
+    pub fn show_impe_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
+        let (track, source) = self.impe_to_handle.as_ref().unwrap().clone();
+        let label = format!("{} — {}", track.artist, track.title);
+        ui.label(egui::RichText::new(&label).size(16.0).strong());
+        ui.add_space(4.0);
+        ui.label(egui::RichText::new(format!("Источник: {}", source.label())).size(12.0).color(theme.text_muted));
+        ui.add_space(12.0);
+        ui.horizontal(|ui| {
+            if ui.add(theme.success_button("📥 Скачать")).clicked() {
+                let src = source;
+                let t = track.clone();
+                if src == DownloadSource::YtDlp {
+                    if let Err(err) = Self::require_yt_dlp_ui() {
+                        self.status = format!("❌ {}", err);
+                        return;
+                    }
+                }
+                let folder = self.downloads_folder.clone();
+                let fmt = self.ytdlp_format;
+                let id = self.next_download_id;
+                self.next_download_id += 1;
+                let status = Arc::new(Mutex::new(DownloadStatus::Pending));
+                let cancel = Arc::new(AtomicBool::new(false));
+                let child_pid = Arc::new(Mutex::new(None));
+                self.download_tasks.push(DownloadTask {
+                    _id: id,
+                    track: t.clone(),
+                    source: src,
+                    ytdlp_format: if src == DownloadSource::YtDlp { Some(fmt) } else { None },
+                    status: status.clone(),
+                    cancel: cancel.clone(),
+                    child_pid: child_pid.clone(),
+                });
+                self.status = format!("⏳ Загрузка: {}", t.title);
+                let log_tx = self.log_tx.clone();
+                match src {
+                    DownloadSource::Mp3Party => Self::download_track_mp3party(t, folder, status, cancel, log_tx),
+                    DownloadSource::DriveMusic => Self::download_track_drivemusic(t, folder, status, cancel, log_tx),
+                    DownloadSource::PesniMe => Self::download_track_pesnime(t, folder, status, cancel, log_tx),
+                    DownloadSource::YtDlp => Self::download_track_ytdlp(t, folder, fmt, status, cancel, child_pid, log_tx),
+                }
+                self.show_downloads = true;
+                self.impe_to_handle = None;
+                return;
+            }
+            if ui.add(theme.neutral_button("🎧 Слушать")).clicked() {
+                let src = source;
+                let t = track.clone();
+                if src == DownloadSource::YtDlp {
+                    if let Err(err) = Self::require_yt_dlp_ui() {
+                        self.status = format!("❌ {}", err);
+                        return;
+                    }
+                }
+                if !Self::offer_mpv_ui(true) {
+                    return;
+                }
+                self.status = format!("🎧 Поток: {} — {}", t.artist, t.title);
+                self.loading = true;
+                let (tx, rx) = mpsc::channel();
+                self.stream_rx = Some(rx);
+                let fmt = self.ytdlp_format;
+                thread::spawn(move || {
+                    let result = (|| {
+                        let url = match src {
+                            DownloadSource::Mp3Party => {
+                                if t.url.starts_with("http") { t.url.clone() }
+                                else { format!("https://dl2.mp3party.net/online/{}.mp3", t.id) }
+                            }
+                            DownloadSource::DriveMusic => LinkParserApp::drivemusic_stream_url(&t)?,
+                            DownloadSource::PesniMe => LinkParserApp::pesnime_stream_url(&t)?,
+                            DownloadSource::YtDlp => LinkParserApp::ytdlp_stream_url(&t, fmt)?,
+                        };
+                        let title = format!("{} — {}", t.artist, t.title);
+                        let sub = format!("Стрим {}", src.label());
+                        let is_video = src == DownloadSource::YtDlp && fmt == YtDlpFormat::Mp4;
+                        Ok((url, title, sub, is_video))
+                    })();
+                    let _ = tx.send(result);
+                });
+                self.impe_to_handle = None;
+                return;
+            }
+            if ui.add(theme.neutral_button("➕ В плейлист")).clicked() {
+                let item = PlaylistItem {
+                    path_or_url: track.url.clone(),
+                    title: format!("{} — {}", track.artist, track.title),
+                    subtitle: format!("Стрим {}", source.label()),
+                    is_video: false,
+                    is_url: true,
+                };
+                self.player.add_to_playlist(item);
+                self.status = format!("➕ {} добавлен в плейлист", track.title);
+                self.impe_to_handle = None;
+                return;
+            }
+            if ui.add(theme.neutral_button("✕ Закрыть")).clicked() {
+                self.impe_to_handle = None;
+            }
+        });
     }
 
     pub fn show_playlist_panel(&mut self, ui: &mut egui::Ui, theme: AppTheme) {
@@ -1517,4 +1808,34 @@ impl LinkParserApp {
                 }
             });
     }
+}
+
+// ═══════════════════════════════════════════
+//  Утилиты .impe
+// ═══════════════════════════════════════════
+
+pub fn parse_impe(text: &str) -> Option<(TrackInfo, DownloadSource)> {
+    let mut source: Option<String> = None;
+    let mut id: Option<String> = None;
+    let mut artist = String::new();
+    let mut title = String::new();
+    let mut url = String::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if let Some(eq) = line.find('=') {
+            let key = line[..eq].trim();
+            let value = line[eq + 1..].trim();
+            match key {
+                "source" => source = Some(value.to_string()),
+                "id" => id = Some(value.to_string()),
+                "artist" => artist = value.to_string(),
+                "title" => title = value.to_string(),
+                "url" => url = value.to_string(),
+                _ => {}
+            }
+        }
+    }
+    let id = id?;
+    let dl_source = DownloadSource::from_impe_name(source.as_deref()?)?;
+    Some((TrackInfo { id, artist, title, url }, dl_source))
 }

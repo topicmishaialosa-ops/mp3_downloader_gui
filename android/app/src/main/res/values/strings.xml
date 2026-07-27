@@ -33,4 +33,14 @@
     <string name="prev">Предыдущий</string>
     <string name="next">Следующий</string>
     <string name="loop">Повтор</string>
+    <string name="playlist">Очередь</string>
+    <string name="add_to_playlist">В очередь</string>
+    <string name="queue_empty">Очередь пуста</string>
+    <string name="share_track">Поделиться треком</string>
+    <string name="impe_title">Трек из .impe</string>
+    <string name="impe_message">Скачать этот трек?</string>
+    <string name="impe_download">Скачать</string>
+    <string name="impe_playlist">В очередь</string>
+    <string name="impe_stream">Слушать</string>
+    <string name="impe_bad_format">Неверный формат .impe</string>
 </resources>

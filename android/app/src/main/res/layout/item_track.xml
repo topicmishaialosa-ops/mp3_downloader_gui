@@ -123,6 +123,51 @@
                 app:iconPadding="0dp"
                 app:iconSize="22dp"
                 app:iconTint="@color/text_on_primary" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/addToPlaylistButton"
+                style="@style/Widget.Material3.Button.IconButton.Filled"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="@string/add_to_playlist"
+                app:backgroundTint="@color/bg_card_elevated"
+                app:icon="@drawable/ic_music_note"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="22dp"
+                app:iconTint="@color/primary"
+                app:strokeColor="@color/primary"
+                app:strokeWidth="1dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/shareButton"
+                style="@style/Widget.Material3.Button.IconButton.Filled"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Копировать ссылку"
+                app:backgroundTint="@color/bg_card_elevated"
+                app:icon="@drawable/ic_copy"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="18dp"
+                app:iconTint="@color/primary"
+                app:strokeColor="@color/primary"
+                app:strokeWidth="1dp" />
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/saveImpeButton"
+                style="@style/Widget.Material3.Button.IconButton.Filled"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:contentDescription="Сохранить .impe"
+                app:backgroundTint="@color/bg_card_elevated"
+                app:icon="@drawable/ic_save"
+                app:iconGravity="textStart"
+                app:iconPadding="0dp"
+                app:iconSize="18dp"
+                app:iconTint="@color/primary"
+                app:strokeColor="@color/primary"
+                app:strokeWidth="1dp" />
         </LinearLayout>
 
         <com.google.android.material.progressindicator.LinearProgressIndicator

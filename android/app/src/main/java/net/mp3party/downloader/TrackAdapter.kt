@@ -9,6 +9,9 @@ import net.mp3party.downloader.databinding.ItemTrackBinding
 class TrackAdapter(
     private val onDownload: (Track, Int) -> Unit,
     private val onStream: (Track, Int) -> Unit,
+    private val onAddToPlaylist: (Track) -> Unit = {},
+    private val onCopyLink: (Track) -> Unit = {},
+    private val onSaveImpe: (Track) -> Unit = {},
 ) : RecyclerView.Adapter<TrackAdapter.Holder>() {
 
     private val items = mutableListOf<Track>()
@@ -76,6 +79,7 @@ class TrackAdapter(
             val src = when (track.source) {
                 DownloadSource.MP3Party -> "MP3Party"
                 DownloadSource.DriveMusic -> "DriveMusic"
+                DownloadSource.PesniMe -> "Pesni.me"
                 DownloadSource.YouTube -> "YouTube"
             }
             binding.trackId.text = "[$src] ID ${track.id}"
@@ -85,8 +89,8 @@ class TrackAdapter(
                 ?: '?'
             binding.trackInitial.text = initial.uppercaseChar().toString()
 
-            val isYoutube = track.source == DownloadSource.YouTube
-            binding.streamButton.isVisible = isYoutube
+            val canStream = track.source == DownloadSource.YouTube || track.source == DownloadSource.PesniMe
+            binding.streamButton.isVisible = canStream
 
             val busy = isDownloading || isStreaming
             binding.itemProgress.isVisible = busy
@@ -119,6 +123,18 @@ class TrackAdapter(
                 } else {
                     onStream(track, pos)
                 }
+            }
+
+            binding.addToPlaylistButton.setOnClickListener {
+                onAddToPlaylist(track)
+            }
+
+            binding.shareButton.setOnClickListener {
+                onCopyLink(track)
+            }
+
+            binding.saveImpeButton.setOnClickListener {
+                onSaveImpe(track)
             }
         }
     }

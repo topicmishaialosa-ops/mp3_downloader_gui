@@ -21,8 +21,15 @@ pub(crate) static RE_DRIVEMUSIC_SEARCH: LazyLock<Regex> = LazyLock::new(|| {
     )
     .unwrap()
 });
+pub(crate) static RE_PESNIME_TRACK: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"\\"id\\":(\d+),\\"artist\\":\\"([^"\\]*)\\",\\"title\\":\\"([^"\\]*)\\",\\"version\\":\\"[^"\\]*\\",\\"duration\\":(\d+),\\"bitrate\\":([^,]*),\\"size\\":([^,]*),\\"play\\":\\"([^"\\]+)\\",\\"download\\":\\"([^"\\]+)\\""#,
+    )
+    .unwrap()
+});
 
 pub const DRIVEMUSIC_BASE: &str = "https://ru.drivemusic.me";
+pub const PESNIME_BASE: &str = "https://music.pesni.me";
 pub const MIN_DOWNLOAD_BYTES: u64 = 50 * 1024;
 pub const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 pub const MAX_LOG_LINES: usize = 2000;
@@ -91,6 +98,7 @@ pub enum DownloadSource {
     Mp3Party,
     DriveMusic,
     YtDlp,
+    PesniMe,
 }
 
 impl DownloadSource {
@@ -99,6 +107,26 @@ impl DownloadSource {
             DownloadSource::Mp3Party => "MP3Party",
             DownloadSource::DriveMusic => "DriveMusic",
             DownloadSource::YtDlp => "YouTube (yt-dlp)",
+            DownloadSource::PesniMe => "Pesni.me",
+        }
+    }
+
+    pub fn impe_name(self) -> &'static str {
+        match self {
+            DownloadSource::Mp3Party => "MP3Party",
+            DownloadSource::DriveMusic => "DriveMusic",
+            DownloadSource::YtDlp => "YouTube",
+            DownloadSource::PesniMe => "PesniMe",
+        }
+    }
+
+    pub fn from_impe_name(s: &str) -> Option<Self> {
+        match s {
+            "MP3Party" => Some(DownloadSource::Mp3Party),
+            "DriveMusic" => Some(DownloadSource::DriveMusic),
+            "YouTube" => Some(DownloadSource::YtDlp),
+            "PesniMe" => Some(DownloadSource::PesniMe),
+            _ => None,
         }
     }
 }
@@ -151,6 +179,7 @@ pub struct LinkParserApp {
     pub show_downloads: bool,
     pub show_logs: bool,
     pub show_batch_window: bool,
+    pub batch_autodownload: bool,
     pub log_lines: Vec<String>,
     pub log_tx: mpsc::Sender<String>,
     pub log_rx: mpsc::Receiver<String>,
@@ -165,6 +194,9 @@ pub struct LinkParserApp {
     pub player_volume_request: Option<f32>,
     pub show_playlist_window: bool,
     pub stream_rx: Option<mpsc::Receiver<Result<(String, String, String, bool), String>>>,
+    pub impe_to_handle: Option<(TrackInfo, DownloadSource)>,
+    pub copy_source: DownloadSource,
+    pub copy_rx: Option<mpsc::Receiver<String>>,
 }
 
 impl Default for LinkParserApp {
@@ -190,6 +222,7 @@ impl Default for LinkParserApp {
             show_downloads: false,
             show_logs: false,
             show_batch_window: false,
+            batch_autodownload: false,
             log_lines: vec!["✅ Приложение запущено.".to_string()],
             log_tx,
             log_rx,
@@ -204,6 +237,9 @@ impl Default for LinkParserApp {
             player_volume_request: None,
             show_playlist_window: false,
             stream_rx: None,
+            impe_to_handle: None,
+            copy_source: DownloadSource::Mp3Party,
+            copy_rx: None,
         }
     }
 }

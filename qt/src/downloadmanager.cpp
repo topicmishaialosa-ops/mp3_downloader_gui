@@ -7,6 +7,7 @@
 
 #include "drivemusicapi.h"
 #include "mp3partyapi.h"
+#include "pesnimeapi.h"
 #include "ytdlphelper.h"
 
 DownloadManager::DownloadManager(QObject *parent) : QObject(parent) {}
@@ -77,6 +78,9 @@ void DownloadManager::runTask(int index) {
             break;
         case DownloadSource::DriveMusic:
             path = DriveMusicApi::download(track, folder, &err);
+            break;
+        case DownloadSource::PesniMe:
+            path = PesniMeApi::download(track, folder, &err);
             break;
         case DownloadSource::YtDlp:
             path = YtDlpHelper::download(track, folder, taskCopy.ytFormat, &err);

@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::batch;
+use crate::downloader::sanitize_filename;
 use crate::types::*;
 use crate::LinkParserApp;
 
@@ -158,6 +159,7 @@ impl LinkParserApp {
             (DownloadSource::YtDlp, None) => "YouTube",
             (DownloadSource::Mp3Party, _) => "MP3Party",
             (DownloadSource::DriveMusic, _) => "DriveMusic",
+            (DownloadSource::PesniMe, _) => "Pesni.me",
         }
     }
 
@@ -200,6 +202,7 @@ impl LinkParserApp {
                         }
                     }
                     DownloadSource::DriveMusic => LinkParserApp::drivemusic_stream_url(&track)?,
+                    DownloadSource::PesniMe => LinkParserApp::pesnime_stream_url(&track)?,
                     DownloadSource::YtDlp => LinkParserApp::ytdlp_stream_url(&track, fmt)?,
                 };
                 let title = format!("{} — {}", track.artist, track.title);
@@ -229,46 +232,137 @@ impl LinkParserApp {
             return;
         }
 
+        let mut direct_links: Vec<String> = Vec::new();
         let mut ids: Vec<(String, String)> = Vec::new();
+
         for line in &lines {
+            let lower = line.to_lowercase();
+            if lower.starts_with("http://") || lower.starts_with("https://") {
+                if lower.ends_with(".mp3")
+                    || lower.ends_with(".mp4")
+                    || lower.ends_with(".m4a")
+                    || lower.ends_with(".ogg")
+                    || lower.ends_with(".flac")
+                    || lower.ends_with(".wav")
+                    || lower.contains("/download/")
+                    || lower.contains("/dl/online/")
+                    || lower.contains("/dl/download/")
+                    || lower.contains("pl.pesni.me")
+                {
+                    direct_links.push(line.to_string());
+                    continue;
+                }
+            }
             if let Some(id) = Self::extract_id(line) {
                 ids.push((line.to_string(), id));
+            } else if RE_DIGITS.is_match(line.trim()) {
+                ids.push((line.to_string(), line.trim().to_string()));
             } else {
-                if RE_DIGITS.is_match(line.trim()) {
-                    ids.push((line.to_string(), line.trim().to_string()));
-                } else {
-                    self.status = format!("⚠️ Не удалось извлечь ID из: {}", line);
-                    return;
-                }
+                self.status = format!("⚠️ Не удалось распознать: {}", line);
+                return;
             }
         }
 
-        if ids.is_empty() {
-            self.status = "⚠️ Не найдено ID в ссылках.".into();
+        let total = direct_links.len() + ids.len();
+        if total == 0 {
+            self.status = "⚠️ Не найдено ссылок.".into();
             return;
         }
 
         self.tracks.clear();
         self.result_filter.clear();
+        self.output_mode = OutputMode::UrlParsing;
+
         let (tx, rx) = mpsc::channel();
         self.rx = Some(rx);
-        self.total_urls = ids.len();
+        self.total_urls = total;
         self.processed = 0;
         self.error_count = 0;
         self.last_error = None;
         self.begin_loading();
-        self.output_mode = OutputMode::UrlParsing;
-        self.status = format!("⏳ Парсинг {} треков...", ids.len());
-        self.push_log_line(format!(
-            "[{}] ⏳ Парсинг {} треков...",
-            Self::log_timestamp(),
-            ids.len()
-        ));
+        self.status = format!("⏳ Импорт {} ссылок...", total);
 
         let log_tx = self.log_tx.clone();
         thread::spawn(move || {
+            for url in direct_links {
+                let lower = url.to_lowercase();
+                let resolved = if lower.contains("mp3party.net/download/") {
+                    let id = url
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or("")
+                        .trim_end_matches(".mp3")
+                        .trim_end_matches(".mp4");
+                    if !id.is_empty() {
+                        Self::fetch_track_info(id).ok().map(|mut t| {
+                            t.url = url.clone();
+                            t
+                        })
+                    } else {
+                        None
+                    }
+                } else if lower.contains("pl.pesni.me") || lower.contains("dw.pesni.me") {
+                    let id = url
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or("")
+                        .split('.').next()
+                        .unwrap_or("");
+                    if !id.is_empty() {
+                        Self::fetch_track_info_pesnime(id).ok().map(|mut t| {
+                            t.url = url.clone();
+                            t
+                        })
+                    } else {
+                        None
+                    }
+                } else if lower.contains("drivemusic.me/dl/") {
+                    let raw = url
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or("track")
+                        .split('.').next()
+                        .unwrap_or("track");
+                    let filename = sanitize_filename(raw);
+                    Some(TrackInfo {
+                        id: String::new(),
+                        artist: String::new(),
+                        title: filename,
+                        url: url.clone(),
+                    })
+                } else {
+                    None
+                };
+
+                match resolved {
+                    Some(track) => {
+                        let _ = tx.send(ParseResult::Success(track));
+                    }
+                    None => {
+                        let raw = url
+                            .rsplit('/')
+                            .next()
+                            .unwrap_or("track")
+                            .split('.').next()
+                            .unwrap_or("track");
+                        let filename = sanitize_filename(raw);
+                        let _ = tx.send(ParseResult::Success(TrackInfo {
+                            id: String::new(),
+                            artist: String::new(),
+                            title: filename,
+                            url,
+                        }));
+                    }
+                }
+            }
+
             for (orig_url, id) in ids {
-                match Self::fetch_track_info(&id) {
+                let result = if orig_url.contains("pesni.me") {
+                    Self::fetch_track_info_pesnime(&id)
+                } else {
+                    Self::fetch_track_info(&id)
+                };
+                match result {
                     Ok(track) => {
                         let _ = tx.send(ParseResult::Success(track));
                     }
@@ -322,6 +416,7 @@ impl LinkParserApp {
             let result = match source {
                 DownloadSource::Mp3Party => Self::search_tracks(&query),
                 DownloadSource::DriveMusic => Self::search_tracks_drivemusic(&query),
+                DownloadSource::PesniMe => Self::search_tracks_pesnime(&query),
                 DownloadSource::YtDlp => Self::search_tracks_ytdlp(&query),
             };
             match result {
@@ -402,6 +497,7 @@ impl LinkParserApp {
                 let result = match source {
                     DownloadSource::Mp3Party => Self::search_tracks(&q_text),
                     DownloadSource::DriveMusic => Self::search_tracks_drivemusic(&q_text),
+                    DownloadSource::PesniMe => Self::search_tracks_pesnime(&q_text),
                     DownloadSource::YtDlp => Self::search_tracks_ytdlp(&q_text),
                 };
                 match result {
@@ -474,6 +570,9 @@ impl LinkParserApp {
                 }
                 DownloadSource::DriveMusic => {
                     Self::download_track_drivemusic(track.clone(), folder, status, cancel, log_tx);
+                }
+                DownloadSource::PesniMe => {
+                    Self::download_track_pesnime(track.clone(), folder, status, cancel, log_tx);
                 }
                 DownloadSource::YtDlp => {
                     Self::download_track_ytdlp(
