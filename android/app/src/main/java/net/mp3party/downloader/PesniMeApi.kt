@@ -9,7 +9,7 @@ import java.util.concurrent.TimeUnit
 import java.util.regex.Pattern
 
 object PesniMeApi {
-    private const val BASE = "https://music.pesni.me"
+    private const val BASE = "https://mix.pesni.me"
     private const val USER_AGENT =
         "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
     private const val MIN_DOWNLOAD_BYTES = 50 * 1024
