@@ -29,7 +29,7 @@ pub(crate) static RE_PESNIME_TRACK: LazyLock<Regex> = LazyLock::new(|| {
 });
 
 pub const DRIVEMUSIC_BASE: &str = "https://ru.drivemusic.me";
-pub const PESNIME_BASE: &str = "https://mix.pesni.me";
+pub const PESNIME_BASE: &str = "https://play.pesni.me/";
 pub const MIN_DOWNLOAD_BYTES: u64 = 50 * 1024;
 pub const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 pub const MAX_LOG_LINES: usize = 2000;
